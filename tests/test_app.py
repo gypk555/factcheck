@@ -97,14 +97,23 @@ def test_client_ip_ignores_headers_without_trusted_proxy(monkeypatch):
     assert app_module.client_ip(_Req({"x-forwarded-for": "6.6.6.6"}, host="5.5.5.5")) == "5.5.5.5"
 
 
-def test_rate_limiter_evicts_stale_not_everyone(monkeypatch):
+def test_rate_limiter_full_table_evicts_least_recent(monkeypatch):
     rl = app_module.RateLimiter(1)
     monkeypatch.setattr(rl, "MAX_KEYS", 2)
     assert rl.allow("a") and rl.allow("b")
-    assert not rl.allow("c")          # table full of active visitors: newcomer refused
-    assert not rl.allow("a")          # and "a" is still limited (history not wiped)
-    rl.hits["a"][0] -= 120            # make "a" stale
-    assert rl.allow("c")              # stale entry evicted, room for "c"
+    assert not rl.allow("a")          # "a" is limited, and now the most recently seen
+    assert rl.allow("c")              # newcomer is never locked out; "b" is forgotten
+    assert "b" not in rl.hits and len(rl.hits) == 2
+    assert not rl.allow("a")          # "a" keeps its history
+
+
+def test_visitor_key_groups_ipv6_by_64():
+    k = app_module.visitor_key
+    assert k("2001:db8:1:2::1") == k("2001:db8:1:2:ffff::9") == "2001:db8:1:2::/64"
+    assert k("2001:db8:1:3::1") != k("2001:db8:1:2::1")
+    assert k("203.0.113.7") == "203.0.113.7"
+    assert k("::ffff:203.0.113.7") == "203.0.113.7"
+    assert k("unknown") == "unknown"
 
 
 # ----- fact-check parsing and safety

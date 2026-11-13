@@ -6,9 +6,10 @@ Render:  uvicorn truthlens.app:app --host 0.0.0.0 --port $PORT
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
@@ -62,31 +63,29 @@ templates = Jinja2Templates(directory=HERE / "templates")
 class RateLimiter:
     """Small in-memory sliding-window limiter (enough for one Render instance)."""
 
+    MAX_KEYS = 10_000
+
     def __init__(self, per_minute: int):
         self.per_minute = per_minute
-        self.hits: dict[str, deque] = defaultdict(deque)
-
-    MAX_KEYS = 10_000
+        # Ordered by last use, so the least-recently-seen visitor is first.
+        self.hits: OrderedDict[str, deque] = OrderedDict()
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
-        if key not in self.hits and len(self.hits) >= self.MAX_KEYS:
-            self._evict_stale(now)
-            if len(self.hits) >= self.MAX_KEYS:
-                # Table full of active visitors: refuse newcomers rather than
-                # wiping everyone's history (which would reset all limits).
-                return False
-        q = self.hits[key]
+        q = self.hits.get(key)
+        if q is None:
+            # Table full: forget the least-recently-seen visitor (memory stays
+            # bounded, and newcomers are never locked out by a flood of addresses).
+            while len(self.hits) >= self.MAX_KEYS:
+                self.hits.popitem(last=False)
+            q = self.hits[key] = deque()
+        self.hits.move_to_end(key)
         while q and now - q[0] > 60:
             q.popleft()
         if len(q) >= self.per_minute:
             return False
         q.append(now)
         return True
-
-    def _evict_stale(self, now: float) -> None:
-        for k in [k for k, q in self.hits.items() if not q or now - q[-1] > 60]:
-            del self.hits[k]
 
 
 # Per-visitor limits, plus a site-wide cap on fact-check look-ups so the API key's
@@ -100,6 +99,19 @@ GLOBAL_LIMITERS = {"/api/factcheck": RateLimiter(int(os.environ.get("FACTCHECK_G
 # Only trust proxy headers when a proxy we know about sits in front of the app.
 # Render sets RENDER=true; elsewhere opt in with TRUST_PROXY=1.
 TRUST_PROXY = os.environ.get("TRUST_PROXY", os.environ.get("RENDER", "")).lower() in ("1", "true", "yes")
+
+
+def visitor_key(ip: str) -> str:
+    """One rate-limit bucket per IPv4 address or per IPv6 /64 network
+    (a single machine usually controls a whole /64, so per-address IPv6
+    buckets would let it pose as millions of visitors)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6 and addr.ipv4_mapped is None:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr.ipv4_mapped or addr)
 
 
 def client_ip(request: Request) -> str:
@@ -127,7 +139,7 @@ async def guard(request: Request, call_next):
     if request.method == "POST":
         # 1. Rate-limit BEFORE reading or validating the body, so bad requests count too.
         limiter = LIMITERS.get(request.url.path)
-        if limiter and not limiter.allow(client_ip(request)):
+        if limiter and not limiter.allow(visitor_key(client_ip(request))):
             return _error(429, "Too many requests. Wait a minute and try again.")
         overall = GLOBAL_LIMITERS.get(request.url.path)
         if overall and not overall.allow("all"):
