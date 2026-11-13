@@ -109,9 +109,11 @@ def visitor_key(ip: str) -> str:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return ip
-    if addr.version == 6 and addr.ipv4_mapped is None:
-        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
-    return str(addr.ipv4_mapped or addr)
+    if addr.version == 4:
+        return str(addr)
+    if addr.ipv4_mapped is not None:  # "::ffff:1.2.3.4" is really an IPv4 client
+        return str(addr.ipv4_mapped)
+    return str(ipaddress.ip_network(f"{addr}/64", strict=False))
 
 
 def client_ip(request: Request) -> str:
