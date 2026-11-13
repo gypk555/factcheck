@@ -198,7 +198,7 @@ Other measures:
 
 **Deployment.** The runtime needs only FastAPI, Uvicorn, NumPy and httpx; scikit-learn and pandas are used only for training. The 2 MB model is committed, so Render installs and starts the app without training anything (`render.yaml` Blueprint, free plan, `/healthz` health check).
 
-**Testing.** 54 automated tests cover cleaning, TF-IDF arithmetic, explanation consistency, API validation, security headers and the regressions above.
+**Testing.** 55 automated tests cover cleaning, TF-IDF arithmetic, explanation consistency, API validation, security headers and the regressions above.
 
 ## 7. Limitations
 
@@ -232,7 +232,7 @@ TruthLens shows that a simple, transparent model can reach about 94% accuracy on
 ```bash
 uv sync
 uv run --group train python scripts/train.py   # downloads data, trains, writes reports/
-uv run pytest -q                               # 54 tests
+uv run pytest -q                               # 55 tests
 uv run uvicorn truthlens.app:app               # http://127.0.0.1:8000
 ```
 

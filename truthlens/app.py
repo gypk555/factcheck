@@ -65,27 +65,44 @@ class RateLimiter:
 
     MAX_KEYS = 10_000
 
+    OVERFLOW = "__overflow__"
+    OVERFLOW_FACTOR = 20  # the shared overflow bucket allows 20x one visitor's limit
+
     def __init__(self, per_minute: int):
         self.per_minute = per_minute
         # Ordered by last use, so the least-recently-seen visitor is first.
         self.hits: OrderedDict[str, deque] = OrderedDict()
+        self.overflow: deque = deque()
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
-        q = self.hits.get(key)
-        if q is None:
-            # Table full: forget the least-recently-seen visitor (memory stays
-            # bounded, and newcomers are never locked out by a flood of addresses).
-            while len(self.hits) >= self.MAX_KEYS:
-                self.hits.popitem(last=False)
-            q = self.hits[key] = deque()
+        if key not in self.hits and len(self.hits) >= self.MAX_KEYS:
+            self._evict_stale(now)
+        if key not in self.hits and len(self.hits) >= self.MAX_KEYS:
+            # Still full of visitors whose 60 s window is open. Never erase their
+            # history (that would reset their limits) and never lock newcomers
+            # out: newcomers share one overflow bucket with its own limit.
+            return self._take(self.overflow, now, self.per_minute * self.OVERFLOW_FACTOR)
+        q = self.hits.setdefault(key, deque())
         self.hits.move_to_end(key)
+        return self._take(q, now, self.per_minute)
+
+    @staticmethod
+    def _take(q: deque, now: float, limit: int) -> bool:
         while q and now - q[0] > 60:
             q.popleft()
-        if len(q) >= self.per_minute:
+        if len(q) >= limit:
             return False
         q.append(now)
         return True
+
+    def _evict_stale(self, now: float) -> None:
+        # Oldest-used first; stop at the first visitor still inside its window.
+        while self.hits:
+            k, q = next(iter(self.hits.items()))
+            if q and now - q[-1] <= 60:
+                break
+            del self.hits[k]
 
 
 # Per-visitor limits, plus a site-wide cap on fact-check look-ups so the API key's

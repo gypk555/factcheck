@@ -97,14 +97,26 @@ def test_client_ip_ignores_headers_without_trusted_proxy(monkeypatch):
     assert app_module.client_ip(_Req({"x-forwarded-for": "6.6.6.6"}, host="5.5.5.5")) == "5.5.5.5"
 
 
-def test_rate_limiter_full_table_evicts_least_recent(monkeypatch):
+def test_rate_limiter_full_table_keeps_active_windows(monkeypatch):
+    rl = app_module.RateLimiter(1)
+    monkeypatch.setattr(rl, "MAX_KEYS", 2)
+    monkeypatch.setattr(rl, "OVERFLOW_FACTOR", 2)
+    assert rl.allow("a") and rl.allow("b")
+    # Table full of active visitors: newcomers go to the shared overflow bucket
+    # (limit 1 x 2) instead of evicting anyone or being locked out.
+    assert rl.allow("c") and rl.allow("d")
+    assert not rl.allow("e")
+    assert set(rl.hits) == {"a", "b"}
+    assert not rl.allow("a") and not rl.allow("b")   # active limits never reset
+
+
+def test_rate_limiter_evicts_only_stale(monkeypatch):
     rl = app_module.RateLimiter(1)
     monkeypatch.setattr(rl, "MAX_KEYS", 2)
     assert rl.allow("a") and rl.allow("b")
-    assert not rl.allow("a")          # "a" is limited, and now the most recently seen
-    assert rl.allow("c")              # newcomer is never locked out; "b" is forgotten
-    assert "b" not in rl.hits and len(rl.hits) == 2
-    assert not rl.allow("a")          # "a" keeps its history
+    rl.hits["a"][0] -= 120            # "a"'s window has closed
+    assert rl.allow("c")              # "a" evicted, "c" gets its own bucket
+    assert set(rl.hits) == {"b", "c"}
 
 
 def test_visitor_key_groups_ipv6_by_64():
