@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TruthLens</title>
+  <meta name="description" content="Checks whether a news text reads like fake news and shows which words drove the call.">
+  <link rel="preload" href="{{ url_for('static', path='fonts/atkinson-400.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v={{ version }}">
+  <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap masthead-row">
+      <a class="wordmark" href="/" aria-label="TruthLens home">
+        <svg class="lens" viewBox="0 0 32 32" aria-hidden="true"><circle cx="13" cy="13" r="9"/><path d="M20 20l8 8"/></svg>
+        TruthLens
+      </a>
+      <p class="tagline">Reads a news text, says whether it looks like fake news, and shows you the words behind that call.</p>
+    </div>
+  </header>
+
+  <main class="wrap layout">
+    <section class="page" aria-labelledby="text-heading">
+      <div class="page-head">
+        <h1 id="text-heading">News text</h1>
+        <div class="examples" role="group" aria-label="Load an example">
+          <span class="examples-label">Try an example:</span>
+          <button type="button" class="chip" data-example="sensational">Viral post</button>
+          <button type="button" class="chip" data-example="wire">Wire report</button>
+          <button type="button" class="chip" data-example="claim">One-line claim</button>
+        </div>
+      </div>
+
+      <form id="analyze-form" class="sheet" novalidate>
+        <label for="news-text" class="visually-hidden">Headline or article text</label>
+        <textarea id="news-text" name="text" maxlength="{{ max_chars }}" required
+          placeholder="Paste a headline, or better, the headline and the full article."></textarea>
+        <div id="annotated" class="annotated" hidden tabindex="-1" aria-label="Your text with influential words highlighted"></div>
+
+        <div class="sheet-foot">
+          <span id="char-count" class="muted">0 / {{ "{:,}".format(max_chars) }} characters</span>
+          <div class="actions">
+            <button type="button" id="edit-btn" class="btn btn-quiet" hidden>Edit text</button>
+            <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze text</button>
+          </div>
+        </div>
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+      </form>
+
+      <div class="legend" id="legend" hidden>
+        <span><mark class="swatch swatch-fake"></mark>Pushed towards fake</span>
+        <span><mark class="swatch swatch-real"></mark>Pushed towards real</span>
+        <span class="muted">Only the strongest words are marked; stronger colour means a stronger push. Hover a word to see its weight.</span>
+      </div>
+    </section>
+
+    <aside class="rail" aria-label="Result">
+      <section class="verdict" id="verdict" data-state="idle" aria-live="polite">
+        <h2 class="verdict-title" id="verdict-label">No text analyzed yet</h2>
+        <p class="verdict-text" id="verdict-text">Paste some news text and choose Analyze text.</p>
+
+        <div class="scale" aria-hidden="true">
+          <div class="scale-track">
+            <div class="scale-zone" id="zone" data-lo="{{ real_threshold }}" data-hi="{{ fake_threshold }}"></div>
+            <div class="scale-needle" id="needle"></div>
+          </div>
+          <div class="scale-ends"><span>Real</span><span>Uncertain</span><span>Fake</span></div>
+        </div>
+        <p class="score" id="score" hidden></p>
+        <ul class="warnings" id="warnings"></ul>
+      </section>
+
+      <section class="evidence" id="evidence" hidden>
+        <div class="terms">
+          <div>
+            <h3>Words pointing to fake</h3>
+            <ol id="fake-terms" class="term-list term-fake"></ol>
+          </div>
+          <div>
+            <h3>Words pointing to real</h3>
+            <ol id="real-terms" class="term-list term-real"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="factcheck" id="factcheck" hidden>
+        <h3>Published fact-checks</h3>
+        {% if factcheck_enabled %}
+          <p class="muted">Searches fact-checking sites (via Google Fact Check Tools) for claims like your first sentence. This sends that sentence to Google.</p>
+          <button type="button" class="btn btn-quiet" id="factcheck-btn">Search fact-checks</button>
+          <div id="factcheck-results" aria-live="polite"></div>
+        {% else %}
+          <p class="muted">Not set up on this server. Add a Google Fact Check Tools API key to search what real fact-checkers have said.</p>
+        {% endif %}
+      </section>
+    </aside>
+  </main>
+
+  <section class="wrap about" aria-labelledby="about-heading">
+    <h2 id="about-heading">How TruthLens decides, and where it fails</h2>
+    <div class="about-grid">
+      <div>
+        <p>TruthLens turns your text into word and word-pair scores (TF-IDF) and feeds them to a Logistic Regression model trained on {{ "{:,}".format(meta.get('train_examples', 0)) }} examples from the WELFake news dataset. Every highlighted word's colour is its exact share of the final score, so the explanation is the model's real reasoning, not a guess.</p>
+        <p>It judges <em>how a text is written</em>, not whether it is true. It has no knowledge of events. A carefully written lie can pass, and a true story written in a sensational style can be flagged.</p>
+      </div>
+      <dl class="stats">
+        {% set t = meta.get('test_metrics', {}) %}{% set h = meta.get('headline_metrics', {}) %}{% set l = meta.get('liar2_metrics', {}) %}
+        <div><dt>Unseen WELFake articles</dt><dd>{{ "%.1f"|format(t.get('accuracy', 0) * 100) }}% correct</dd></div>
+        <div><dt>Unseen headlines only</dt><dd>{{ "%.1f"|format(h.get('accuracy', 0) * 100) }}% correct</dd></div>
+        <div><dt>PolitiFact claims (LIAR2)</dt><dd>{{ "%.1f"|format(l.get('accuracy', 0) * 100) }}% correct</dd></div>
+      </dl>
+    </div>
+    <p class="muted small">The last figure is worse than simply answering "fake" every time: short political claims from a different source are beyond what a style-based model can judge. Always confirm with a fact-checking organisation. Model: {{ meta.get('model', '') }}, trained {{ meta.get('trained_on', '') }}.</p>
+  </section>
+
+  <footer class="wrap footer muted small">TruthLens {{ version }}. A college mini project. Not a substitute for professional fact-checking.</footer>
+
+  <script src="{{ url_for('static', path='app.js') }}?v={{ version }}" defer></script>
+</body>
+</html>

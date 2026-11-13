@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Downloaded datasets (re-downloaded by scripts/train.py)
+data/raw/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
