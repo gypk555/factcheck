@@ -81,11 +81,30 @@ def test_rate_limiter():
     assert rl.allow("b")
 
 
-def test_client_ip_uses_proxy_appended_entry():
-    class Req:
-        headers = {"x-forwarded-for": "6.6.6.6, 1.2.3.4"}
-        client = None
-    assert app_module.client_ip(Req()) == "1.2.3.4"
+class _Req:
+    def __init__(self, headers, host="10.0.0.1"):
+        self.headers = headers
+        self.client = type("C", (), {"host": host})()
+
+
+def test_client_ip_uses_proxy_appended_entry(monkeypatch):
+    monkeypatch.setattr(app_module, "TRUST_PROXY", True)
+    assert app_module.client_ip(_Req({"x-forwarded-for": "6.6.6.6, 1.2.3.4"})) == "1.2.3.4"
+
+
+def test_client_ip_ignores_headers_without_trusted_proxy(monkeypatch):
+    monkeypatch.setattr(app_module, "TRUST_PROXY", False)
+    assert app_module.client_ip(_Req({"x-forwarded-for": "6.6.6.6"}, host="5.5.5.5")) == "5.5.5.5"
+
+
+def test_rate_limiter_evicts_stale_not_everyone(monkeypatch):
+    rl = app_module.RateLimiter(1)
+    monkeypatch.setattr(rl, "MAX_KEYS", 2)
+    assert rl.allow("a") and rl.allow("b")
+    assert not rl.allow("c")          # table full of active visitors: newcomer refused
+    assert not rl.allow("a")          # and "a" is still limited (history not wiped)
+    rl.hits["a"][0] -= 120            # make "a" stale
+    assert rl.allow("c")              # stale entry evicted, room for "c"
 
 
 # ----- fact-check parsing and safety

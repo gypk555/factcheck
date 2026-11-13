@@ -66,34 +66,52 @@ class RateLimiter:
         self.per_minute = per_minute
         self.hits: dict[str, deque] = defaultdict(deque)
 
+    MAX_KEYS = 10_000
+
     def allow(self, key: str) -> bool:
         now = time.monotonic()
+        if key not in self.hits and len(self.hits) >= self.MAX_KEYS:
+            self._evict_stale(now)
+            if len(self.hits) >= self.MAX_KEYS:
+                # Table full of active visitors: refuse newcomers rather than
+                # wiping everyone's history (which would reset all limits).
+                return False
         q = self.hits[key]
         while q and now - q[0] > 60:
             q.popleft()
         if len(q) >= self.per_minute:
             return False
         q.append(now)
-        if len(self.hits) > 10_000:  # don't let the table grow forever
-            self.hits.clear()
         return True
 
+    def _evict_stale(self, now: float) -> None:
+        for k in [k for k, q in self.hits.items() if not q or now - q[-1] > 60]:
+            del self.hits[k]
 
+
+# Per-visitor limits, plus a site-wide cap on fact-check look-ups so the API key's
+# quota is protected however many addresses a caller uses.
 LIMITERS = {
     "/api/analyze": RateLimiter(60),
     "/api/factcheck": RateLimiter(config.FACTCHECK_RATE_LIMIT_PER_MIN),
 }
+GLOBAL_LIMITERS = {"/api/factcheck": RateLimiter(int(os.environ.get("FACTCHECK_GLOBAL_PER_MIN", "120")))}
+
+# Only trust proxy headers when a proxy we know about sits in front of the app.
+# Render sets RENDER=true; elsewhere opt in with TRUST_PROXY=1.
+TRUST_PROXY = os.environ.get("TRUST_PROXY", os.environ.get("RENDER", "")).lower() in ("1", "true", "yes")
 
 
 def client_ip(request: Request) -> str:
+    socket_ip = request.client.host if request.client else "unknown"
+    if not TRUST_PROXY:
+        return socket_ip  # headers could be set by anyone; use the real connection
     if CLIENT_IP_HEADER and request.headers.get(CLIENT_IP_HEADER):
         return request.headers[CLIENT_IP_HEADER].strip()
-    # Behind a proxy the client IP is the entry the proxy appended, i.e. the
+    # Behind the proxy the client IP is the entry the proxy appended, i.e. the
     # LAST one. Earlier entries are whatever the client sent and can be faked.
     fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
-    if fwd:
-        return fwd[-1]
-    return request.client.host if request.client else "unknown"
+    return fwd[-1] if fwd else socket_ip
 
 
 # ------------------------------------------------------------- middleware
@@ -111,6 +129,9 @@ async def guard(request: Request, call_next):
         limiter = LIMITERS.get(request.url.path)
         if limiter and not limiter.allow(client_ip(request)):
             return _error(429, "Too many requests. Wait a minute and try again.")
+        overall = GLOBAL_LIMITERS.get(request.url.path)
+        if overall and not overall.allow("all"):
+            return _error(429, "This service is busy. Try again in a minute.")
         # 2. Size limit. Require Content-Length: a "chunked" upload has none and
         #    would otherwise be read into memory in full, whatever its size.
         length = request.headers.get("content-length")

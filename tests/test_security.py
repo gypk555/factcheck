@@ -114,6 +114,7 @@ def test_analyze_is_sync_so_it_runs_in_a_thread():
 
 def test_client_ip_header_override(monkeypatch):
     monkeypatch.setattr(app_module, "CLIENT_IP_HEADER", "cf-connecting-ip")
+    monkeypatch.setattr(app_module, "TRUST_PROXY", True)
 
     class Req:
         headers = {"cf-connecting-ip": "9.9.9.9", "x-forwarded-for": "1.1.1.1"}

@@ -53,7 +53,7 @@ uv run pytest -q
 2. In Render: **New → Blueprint**, pick the repository. `render.yaml` sets everything up (build: `pip install -r requirements.txt`, start: `uvicorn`, health check `/healthz`).
 3. Optional: in the service's **Environment** tab, set `GOOGLE_FACTCHECK_API_KEY`.
 
-Rate limits are per visitor IP. By default the IP is the last `X-Forwarded-For` entry. If every visitor seems to share one limit on Render, set `CLIENT_IP_HEADER` (for example `cf-connecting-ip`) in the Environment tab.
+Rate limits are per visitor IP. Proxy headers are trusted only on Render (which sets `RENDER=true`) or when `TRUST_PROXY=1`; otherwise the connection's own address is used. On Render the IP is the last `X-Forwarded-For` entry. If every visitor seems to share one limit there, set `CLIENT_IP_HEADER` (for example `cf-connecting-ip`) in the Environment tab. Fact-check look-ups also have a site-wide cap (`FACTCHECK_GLOBAL_PER_MIN`, default 120) to protect the API key's quota.
 
 Free instances sleep after inactivity; the first visit after a pause takes about a minute. Open the site a few minutes before a demo.
 
