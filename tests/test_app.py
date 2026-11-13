@@ -158,3 +158,34 @@ async def test_factcheck_search_hides_upstream_errors(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# ----- screenshot upload (OCR runs in the browser)
+def test_upload_controls_present(client):
+    html = client.get("/").text
+    assert 'id="image-input"' in html and 'accept="image/' in html
+    assert "ocr.js" in html
+    assert 'id="imagecheck"' in html
+
+
+def test_csp_allows_ocr_but_not_eval(client):
+    csp = client.get("/").headers["content-security-policy"]
+    assert "'wasm-unsafe-eval'" in csp          # WebAssembly OCR engine
+    assert "worker-src 'self'" in csp           # OCR worker from our own site only
+    assert "blob:" in csp.split("img-src")[1].split(";")[0]  # local image preview
+    assert "'unsafe-eval'" not in csp and "'unsafe-inline'" not in csp
+
+
+@pytest.mark.parametrize("path", [
+    "/static/ocr.js",
+    "/static/vendor/tesseract/tesseract.min.js",
+    "/static/vendor/tesseract/worker.min.js",
+    "/static/vendor/tesseract/core/tesseract-core-lstm.wasm.js",
+    "/static/vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js",
+    "/static/vendor/tesseract/lang/eng.traineddata.gz",
+])
+def test_ocr_files_served(client, path):
+    r = client.get(path)
+    assert r.status_code == 200 and len(r.content) > 1000
+    if "/vendor/" in path:
+        assert "max-age" in r.headers["cache-control"]

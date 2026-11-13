@@ -32,6 +32,24 @@
         </div>
       </div>
 
+      <div class="upload" id="upload">
+        <input type="file" id="image-input" class="visually-hidden" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp">
+        <label for="image-input" class="btn btn-quiet upload-btn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>
+          Upload a screenshot
+        </label>
+        <span class="muted small">or drop or paste an image of a post. Its text is read on your device; the image is never uploaded.</span>
+      </div>
+
+      <figure class="shot" id="shot" hidden>
+        <img id="shot-img" alt="The uploaded screenshot">
+        <figcaption>
+          <span id="shot-status" role="status">Reading text from the image…</span>
+          <progress id="shot-progress" max="1" value="0"></progress>
+          <button type="button" class="link-btn" id="shot-remove">Remove image</button>
+        </figcaption>
+      </figure>
+
       <form id="analyze-form" class="sheet" novalidate>
         <label for="news-text" class="visually-hidden">Headline or article text</label>
         <textarea id="news-text" name="text" maxlength="{{ max_chars }}" required
@@ -94,6 +112,18 @@
           <p class="muted">Not set up on this server. Add a Google Fact Check Tools API key to search what real fact-checkers have said.</p>
         {% endif %}
       </section>
+
+      <section class="imagecheck" id="imagecheck" hidden>
+        <h3>Check the picture itself</h3>
+        <p class="muted">TruthLens judges the words in your screenshot, not the photo. Old photos reused with a new, false story are common, so search for where the picture appeared before.</p>
+        <ol class="steps">
+          <li>Save the photo part of the post (crop out the caption).</li>
+          <li>Upload it to a reverse image search:
+            <a href="https://lens.google.com/" target="_blank" rel="noopener noreferrer">Google Lens</a> or
+            <a href="https://tineye.com/" target="_blank" rel="noopener noreferrer">TinEye</a>.</li>
+          <li>If it appeared years earlier or in another country, the post is likely misleading.</li>
+        </ol>
+      </section>
     </aside>
   </main>
 
@@ -116,6 +146,7 @@
 
   <footer class="wrap footer muted small">TruthLens {{ version }}. A college mini project. Not a substitute for professional fact-checking.</footer>
 
+  <script src="{{ url_for('static', path='ocr.js') }}?v={{ version }}" defer></script>
   <script src="{{ url_for('static', path='app.js') }}?v={{ version }}" defer></script>
 </body>
 </html>

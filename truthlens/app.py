@@ -32,8 +32,8 @@ CLIENT_IP_HEADER = os.environ.get("CLIENT_IP_HEADER", "").strip().lower()
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
-        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self'; "
+        "img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; "
         "form-action 'self'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -174,6 +174,10 @@ async def guard(request: Request, call_next):
     response = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
+    if request.url.path.startswith("/static/vendor/"):
+        # Large third-party files (the ~11 MB OCR engine) never change between
+        # releases, so browsers may keep them for a week.
+        response.headers["Cache-Control"] = "public, max-age=604800"
     if request.headers.get("x-forwarded-proto") == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return response

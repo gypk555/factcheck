@@ -4,7 +4,7 @@
 
 ## Abstract
 
-TruthLens is a web application that estimates whether an English news text is written like fake news, and shows exactly which words led to that estimate. It uses TF-IDF features and a Logistic Regression classifier trained on the WELFake dataset (63,580 articles after cleaning). Three classic models were compared (Naive Bayes, Logistic Regression, Linear SVM). On unseen WELFake articles the chosen model reaches 94.1% accuracy (macro F1 0.940). With an "uncertain" zone it answers 95.4% of articles and is right 95.9% of the time when it answers.
+TruthLens is a web application that estimates whether an English news text, typed or read from a screenshot, is written like fake news, and shows exactly which words led to that estimate. It uses TF-IDF features and a Logistic Regression classifier trained on the WELFake dataset (63,580 articles after cleaning). Three classic models were compared (Naive Bayes, Logistic Regression, Linear SVM). On unseen WELFake articles the chosen model reaches 94.1% accuracy (macro F1 0.940). With an "uncertain" zone it answers 95.4% of articles and is right 95.9% of the time when it answers.
 
 On a cross-dataset test of real PolitiFact claims (LIAR2), the same model reaches only 53.2%, which is below the 61.5% obtained by always answering "fake". This shows the main lesson of the project: a text classifier learns the *style* of its training sources, not the *truth* of a claim. The app therefore presents its output as a style-based signal, explains every decision word by word, and optionally searches published fact-checks through the Google Fact Check Tools API.
 
@@ -118,7 +118,18 @@ For an input text, each known term *t* contributes `tfidf(t) × weight(t)` to th
 2. **Ranked lists** of the strongest fake and real terms.
 3. **Warnings** when the text is short (headline only) or when many words are unfamiliar to the model. Text with no recognised words is reported as "Uncertain" rather than given a default answer.
 
-### 3.7 Fact-check lookup
+### 3.7 Screenshot input
+
+Misinformation is mostly shared as screenshots of posts, so the app accepts an image as input. Optical character recognition (OCR) with Tesseract.js runs entirely in the visitor's browser (WebAssembly), so the image is never uploaded and the server stays as small as before. The page:
+
+1. checks the file type (PNG, JPG, WEBP, GIF, BMP) and size (up to 10 MB);
+2. enlarges narrow screenshots (small text reads badly) and caps the image at about 6 megapixels (speed);
+3. extracts the text, joins wrapped lines into paragraphs and drops lines without letters;
+4. shows the text for correction, then analyses it and offers the fact-check search, which uses the first sentence of five or more words (the first OCR line is often a user name or time).
+
+OCR tells us what a post *says*, not whether its photo is genuine. Old photos reused with a new caption are a common trick, so after an image analysis the page explains how to run a reverse image search (Google Lens, TinEye). No free service accepts an uploaded image for this: Google's Fact Check image search only takes a public image URL.
+
+### 3.8 Fact-check lookup
 
 The model cannot know facts. To compensate, the app can send the first sentence of the text to the Google Fact Check Tools API, which returns ratings from fact-checking organisations (for example PolitiFact or AFP). The page states that the sentence is sent to Google. The feature is optional and needs a free API key.
 
@@ -192,17 +203,19 @@ The application was reviewed by an independent security reviewer. The verified i
 
 Other measures:
 - **No pickle files.** The model is stored as JSON plus NumPy arrays and loaded with `allow_pickle=False`, so loading it cannot execute code. Inference is re-implemented in about 30 lines of NumPy; a check in the training script confirms it matches scikit-learn to within 10⁻⁷.
-- A strict Content-Security-Policy (no inline scripts or styles, no third-party hosts), and all text inserted with `textContent`.
+- A strict Content-Security-Policy (no inline scripts or styles, no third-party hosts), and all text inserted with `textContent`. The OCR engine is self-hosted. The only relaxation is `'wasm-unsafe-eval'`, which permits WebAssembly but not JavaScript `eval`.
+- Uploaded images never leave the browser.
 - Only http(s) links from the fact-check API reach the page.
 - The API key is kept server-side and never echoed in errors.
 
 **Deployment.** The runtime needs only FastAPI, Uvicorn, NumPy and httpx; scikit-learn and pandas are used only for training. The 2 MB model is committed, so Render installs and starts the app without training anything (`render.yaml` Blueprint, free plan, `/healthz` health check).
 
-**Testing.** 55 automated tests cover cleaning, TF-IDF arithmetic, explanation consistency, API validation, security headers and the regressions above.
+**Testing.** 63 automated tests cover cleaning, TF-IDF arithmetic, explanation consistency, API validation, security headers and the regressions above.
 
 ## 7. Limitations
 
-- English text only. It does not analyse images, video or other languages.
+- English text only. Screenshots are supported through OCR, but the photo itself is not analysed, and video and other languages are not supported.
+- OCR can misread stylised fonts, memes with text over busy backgrounds, or low-resolution images. The extracted text is shown so the user can correct it.
 - It judges style, not truth, and is weak on short claims and on topics and periods outside 2015–2017 US news.
 - Residual source and time-period shortcuts remain (section 4.4).
 - The fact-check lookup only finds claims that fact-checkers have already covered.
@@ -213,6 +226,7 @@ Other measures:
 - Train on more recent and more diverse sources, with explicit time-based splits.
 - Compare a fine-tuned transformer (for example DistilBERT) with explanation methods such as Integrated Gradients, and measure whether cross-dataset transfer improves.
 - Retrieve evidence (news search or knowledge bases) and verify claims against it, rather than relying on style.
+- Check images directly: reverse image search through a paid API, or image–text consistency models (e.g. CLIP).
 - Support Indian languages, using translated or native datasets.
 
 ## 9. Conclusion
@@ -232,7 +246,7 @@ TruthLens shows that a simple, transparent model can reach about 94% accuracy on
 ```bash
 uv sync
 uv run --group train python scripts/train.py   # downloads data, trains, writes reports/
-uv run pytest -q                               # 55 tests
+uv run pytest -q                               # 63 tests
 uv run uvicorn truthlens.app:app               # http://127.0.0.1:8000
 ```
 

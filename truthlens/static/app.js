@@ -129,6 +129,7 @@ function renderResult(r) {
 
   $("evidence").hidden = false;
   $("factcheck").hidden = false;
+  $("imagecheck").hidden = !imageLoaded;
   $("legend").hidden = false;
   textarea.hidden = true;
   annotated.hidden = false;
@@ -151,6 +152,7 @@ function backToEditing() {
   clear($("warnings"));
   $("evidence").hidden = true;
   $("factcheck").hidden = true;
+  $("imagecheck").hidden = true;
   textarea.focus();
 }
 
@@ -197,6 +199,7 @@ textarea.addEventListener("input", updateCount);
 
 document.querySelectorAll("[data-example]").forEach((btn) => {
   btn.addEventListener("click", () => {
+    removeImage();
     backToEditing();
     textarea.value = EXAMPLES[btn.dataset.example] || "";
     updateCount();
@@ -211,10 +214,11 @@ if (fcBtn) {
     const out = $("factcheck-results");
     clear(out);
     // Fact-check search works best with one short claim: use the first line or
-    // sentence, or the opening of the text if that is too short to search for.
+    // sentence that reads like a claim (5+ words). In screenshots the first
+    // line is often a user name or a date, so it is skipped.
     const all = textarea.value.trim().replace(/\s+/g, " ");
-    let firstLine = textarea.value.trim().split(/\n|(?<=[.!?])\s/)[0].trim();
-    if (firstLine.length < 20) firstLine = all;
+    const parts = textarea.value.trim().split(/\n|(?<=[.!?])\s/).map((s) => s.trim());
+    let firstLine = parts.find((s) => s.split(/\s+/).length >= 5) || all;
     firstLine = firstLine.slice(0, 200);
     fcBtn.disabled = true;
     setText(fcBtn, "Searching…");
@@ -254,5 +258,113 @@ if (fcBtn) {
     }
   });
 }
+
+// ---------- screenshot upload (text is read in the browser by ocr.js)
+const imageInput = $("image-input");
+const shot = $("shot");
+const shotImg = $("shot-img");
+const shotStatus = $("shot-status");
+const shotProgress = $("shot-progress");
+let imageLoaded = false;
+let ocrRun = 0; // newer uploads win over slower, older ones
+
+const OCR_STEPS = {
+  "loading tesseract core": "Loading the text reader (first time only)…",
+  "loading language traineddata": "Loading the English text model (first time only)…",
+  "initializing api": "Starting the text reader…",
+  "recognizing text": "Reading text from the image…",
+};
+
+function removeImage() {
+  ocrRun++;
+  imageLoaded = false;
+  if (shotImg.src) URL.revokeObjectURL(shotImg.src);
+  shotImg.removeAttribute("src");
+  shot.hidden = true;
+  imageInput.value = "";
+  $("imagecheck").hidden = true;
+}
+
+async function handleImage(file) {
+  try {
+    window.TruthLensOCR.check(file);
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
+  const run = ++ocrRun;
+  showError("");
+  backToEditing();
+  if (shotImg.src) URL.revokeObjectURL(shotImg.src);
+  shotImg.src = URL.createObjectURL(file);
+  shot.hidden = false;
+  imageLoaded = true;
+  shotProgress.hidden = false;
+  shotProgress.value = 0;
+  setText(shotStatus, "Preparing the image…");
+  analyzeBtn.disabled = true;
+
+  try {
+    const { text, confidence } = await window.TruthLensOCR.read(file, (m) => {
+      if (run !== ocrRun) return;
+      setText(shotStatus, OCR_STEPS[m.status] || "Reading text from the image…");
+      if (typeof m.progress === "number") shotProgress.value = m.progress;
+    });
+    if (run !== ocrRun) return;
+    shotProgress.hidden = true;
+    const words = text.split(/\s+/).filter(Boolean).length;
+    if (words < 3) {
+      setText(shotStatus, "Found little or no readable text in this image.");
+      showError("No readable text was found. Try a sharper screenshot, or type the post's text in the box.");
+      return;
+    }
+    setText(shotStatus,
+      `Read ${words} words from the image` +
+      (confidence < 70 ? " (low confidence: check the text for mistakes and edit it if needed)." : ". You can edit the text and analyze again."));
+    textarea.value = text.slice(0, maxChars);
+    updateCount();
+    analyzeBtn.disabled = false;
+    form.requestSubmit();
+  } catch (err) {
+    if (run !== ocrRun) return;
+    shotProgress.hidden = true;
+    setText(shotStatus, "Couldn't read this image.");
+    showError(err.message || "Couldn't read the text in this image.");
+  } finally {
+    if (run === ocrRun) analyzeBtn.disabled = false;
+  }
+}
+
+imageInput.addEventListener("change", () => {
+  if (imageInput.files[0]) handleImage(imageInput.files[0]);
+});
+$("shot-remove").addEventListener("click", () => {
+  removeImage();
+  backToEditing();
+});
+
+// Drag and drop onto the text area, and paste (Ctrl/Cmd+V) of an image.
+form.addEventListener("dragover", (e) => {
+  if ([...e.dataTransfer.types].includes("Files")) {
+    e.preventDefault();
+    form.classList.add("dropping");
+  }
+});
+form.addEventListener("dragleave", () => form.classList.remove("dropping"));
+form.addEventListener("drop", (e) => {
+  form.classList.remove("dropping");
+  const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+  if (file) {
+    e.preventDefault();
+    handleImage(file);
+  }
+});
+document.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+  if (item) {
+    e.preventDefault();
+    handleImage(item.getAsFile());
+  }
+});
 
 updateCount();

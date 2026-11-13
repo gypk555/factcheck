@@ -1,6 +1,6 @@
 # TruthLens
 
-An explainable fake news detector. Paste a headline or article and TruthLens says whether it *reads like* fake news, highlights the exact words that pushed it each way, and (optionally) searches published fact-checks for the same claim.
+An explainable fake news detector. Paste a headline or article, or upload a screenshot of a post, and TruthLens says whether it *reads like* fake news, highlights the exact words that pushed it each way, and (optionally) searches published fact-checks for the same claim.
 
 College mini project. Classic machine learning (TF-IDF + Logistic Regression), trained on the WELFake dataset, with an honest cross-dataset test on LIAR2 (PolitiFact claims).
 
@@ -60,6 +60,12 @@ Free instances sleep after inactivity; the first visit after a pause takes about
 If you change dependencies, regenerate `requirements.txt`:
 `uv export --no-dev --no-hashes --no-emit-project -o requirements.txt`
 
+## Screenshots of posts
+
+Choose **Upload a screenshot**, or drop or paste an image. The text in the image is read in the visitor's browser with Tesseract.js (OCR), so the image is never sent to the server. The extracted text appears in the box (edit it if the OCR made mistakes) and is analysed and fact-checked like typed text.
+
+TruthLens does not judge the photo itself. For that, the page guides the visitor to a reverse image search (Google Lens, TinEye) to find where the picture appeared before. No free API accepts an uploaded image for this.
+
 ## How it works
 
 ```
@@ -75,12 +81,15 @@ text ─► clean_text() ─► TF-IDF (words + word pairs) ─► Logistic Regr
 - `truthlens/factcheck.py`: optional Google Fact Check Tools lookup
 - `truthlens/app.py`: FastAPI server and security settings
 - `truthlens/templates`, `truthlens/static`: the web page
+- `truthlens/static/ocr.js`: reads the text in an uploaded screenshot, in the browser
+- `truthlens/static/vendor/tesseract`: self-hosted Tesseract.js OCR engine (about 11 MB, loaded only when an image is uploaded)
 - `scripts/train.py`: data preparation, training, evaluation and figures
 
 ## Security
 
 - The model is stored as JSON + NumPy arrays and loaded with `allow_pickle=False`, so loading it can't run code.
-- Strict Content-Security-Policy (no inline scripts or styles, no third-party hosts). The page inserts all text with `textContent`.
+- Strict Content-Security-Policy (no inline scripts or styles, no third-party hosts). The only relaxations are `'wasm-unsafe-eval'` (WebAssembly for the OCR engine; JavaScript `eval` stays blocked), same-site workers, and `blob:` images for the local preview. The page inserts all text with `textContent`.
+- Uploaded images stay in the browser. Only PNG, JPG, WEBP, GIF and BMP up to 10 MB are accepted, and very large images are scaled down before OCR.
 - Input limits (20,000 characters, 64 KB body, `Content-Length` required so chunked uploads can't bypass the cap), and short validation errors that don't echo input.
 - Linear-time cleaning regexes (tested against ReDoS inputs). Prediction runs in a worker thread, so one long request can't block other visitors.
 - Per-visitor rate limits, applied before the body is read. The API key stays on the server and is never returned in errors.
@@ -91,4 +100,5 @@ text ─► clean_text() ─► TF-IDF (words + word pairs) ─► Logistic Regr
 
 - **WELFake**: Verma et al., *WELFake: Word Embedding Over Linguistic Features for Fake News Detection*, IEEE Transactions on Computational Social Systems, 2021. Copy used: [davanstrien/WELFake](https://huggingface.co/datasets/davanstrien/WELFake). Its dataset card says label 1 = real, but the data shows 1 = fake (21,266 of 21,282 Reuters articles are label 0), so this project treats 1 as fake.
 - **LIAR2**: [chengxuphd/liar2](https://huggingface.co/datasets/chengxuphd/liar2) (Apache-2.0), an extension of LIAR (Wang, 2017).
+- OCR: [Tesseract.js](https://github.com/naptha/tesseract.js) 5.1.1 and tesseract.js-core (Apache-2.0), English data from `@tesseract.js-data/eng` (MIT), self-hosted.
 - Fonts: Atkinson Hyperlegible and Source Serif 4, both SIL Open Font License, self-hosted.
