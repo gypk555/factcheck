@@ -1,17 +1,108 @@
-// TruthLens front end. All server text is inserted with textContent (never
-// innerHTML), so nothing typed or returned can run as HTML/JS.
+// TruthLens front end. Server text is always inserted with textContent (never
+// innerHTML), so nothing typed, uploaded or returned can run as code.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const form = $("analyze-form");
+const setText = (el, t) => { el.textContent = t; };
+const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };
+function pct(x) {
+  if (x > 0.99) return ">99%";
+  if (x < 0.01) return "<1%";
+  return `${Math.round(x * 100)}%`;
+}
+
+const errorBox = $("form-error");
+function showError(msg) { setText(errorBox, msg || ""); errorBox.hidden = !msg; }
+
+async function postJSON(url, body) {
+  return handle(await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+}
+async function postForm(url, form) {
+  return handle(await fetch(url, { method: "POST", body: form }));
+}
+async function handle(res) {
+  let data = {};
+  try { data = await res.json(); } catch { /* not JSON */ }
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Request failed (${res.status}).`);
+  return data;
+}
+
+let requestId = 0; // every new check gets a number; answers to older ones are ignored
+
+// =============================================================== tabs
+const tabs = [$("tab-text"), $("tab-image")];
+function selectTab(tab) {
+  for (const t of tabs) {
+    const on = t === tab;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    $(t.getAttribute("aria-controls")).hidden = !on;
+  }
+  resetResult();
+  showError("");
+}
+tabs.forEach((t, i) => {
+  t.addEventListener("click", () => selectTab(t));
+  t.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+    next.focus();
+    selectTab(next);
+  });
+});
+
+// =============================================================== result card
+const result = $("result");
+const card = $("verdict-card");
+const ICONS = { fake: "#i-fake", real: "#i-real", unsure: "#i-unsure", ai: "#i-ai", edit: "#i-edit" };
+
+function resetResult() {
+  requestId++;
+  result.hidden = true;
+  for (const id of ["why-text", "why-image", "next-text", "next-image", "meters"]) $(id).hidden = true;
+  clear($("notes"));
+  textarea.hidden = false;
+  annotated.hidden = true;
+  editBtn.hidden = true;
+}
+
+function showVerdict({ tone, kind, title, summary, score, caption, notes }) {
+  card.dataset.tone = tone;
+  $("verdict-icon").setAttribute("href", ICONS[tone] || ICONS.unsure);
+  setText($("verdict-kind"), kind);
+  setText($("verdict-title"), title);
+  setText($("verdict-summary"), summary);
+  setText($("gauge-value"), score == null ? "–" : pct(score));
+  setText($("gauge-caption"), caption);
+  const arc = $("gauge-arc");
+  arc.classList.toggle("empty", score == null);
+  arc.style.strokeDasharray = `${score == null ? 0 : Math.max(1, score * 100)} 100`;
+  const list = $("notes");
+  clear(list);
+  for (const n of notes || []) {
+    const li = document.createElement("li");
+    li.textContent = n;
+    list.appendChild(li);
+  }
+  result.hidden = false;
+  result.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+
+$("again-btn").addEventListener("click", () => {
+  resetResult();
+  const imageMode = $("tab-image").getAttribute("aria-selected") === "true";
+  if (imageMode) { clearImage(); imageInput.focus(); } else { textarea.value = ""; updateCount(); textarea.focus(); }
+  window.scrollTo({ top: 0 });
+});
+
+// =============================================================== text mode
+const textForm = $("text-form");
 const textarea = $("news-text");
 const annotated = $("annotated");
-const analyzeBtn = $("analyze-btn");
+const textBtn = $("text-btn");
 const editBtn = $("edit-btn");
-const errorBox = $("form-error");
-const verdict = $("verdict");
 const maxChars = Number(textarea.getAttribute("maxlength"));
-let requestId = 0; // increases with every analysis, so stale answers can be ignored
+const MIN_HIGHLIGHT = 0.2;
 
 const EXAMPLES = {
   sensational:
@@ -29,44 +120,30 @@ const EXAMPLES = {
   claim: "Drinking hot water every hour kills the flu virus in your throat.",
 };
 
-// ---------- helpers
-function setText(el, text) { el.textContent = text; }
-function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
-function pct(x) {
-  if (x > 0.99) return ">99%";
-  if (x < 0.01) return "<1%";
-  return `${Math.round(x * 100)}%`;
-}
-const MIN_HIGHLIGHT = 0.2; // only mark words with at least 20% of the strongest push
-
 function updateCount() {
-  setText($("char-count"), `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()} characters`);
+  setText($("char-count"), `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()}`);
 }
+textarea.addEventListener("input", updateCount);
 
-function showError(msg) {
-  setText(errorBox, msg);
-  errorBox.hidden = !msg;
-}
+document.querySelectorAll("[data-example]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    btn.closest("details").open = false;
+    resetResult();
+    textarea.value = EXAMPLES[btn.dataset.example] || "";
+    updateCount();
+    textForm.requestSubmit();
+  });
+});
 
-// Position the shaded "uncertain" zone from data attributes (CSP forbids inline styles).
-(function placeZone() {
-  const zone = $("zone");
-  const lo = Number(zone.dataset.lo), hi = Number(zone.dataset.hi);
-  zone.style.left = `${lo * 100}%`;
-  zone.style.width = `${(hi - lo) * 100}%`;
-})();
+editBtn.addEventListener("click", () => { resetResult(); textarea.focus(); });
 
-// ---------- rendering
 function renderHighlights(segments) {
   clear(annotated);
   const maxAbs = Math.max(1e-9, ...segments.map((s) => Math.abs(s.weight)));
   const frag = document.createDocumentFragment();
   for (const seg of segments) {
     const strength = Math.abs(seg.weight) / maxAbs;
-    if (strength < MIN_HIGHLIGHT) {
-      frag.appendChild(document.createTextNode(seg.text));
-      continue;
-    }
+    if (strength < MIN_HIGHLIGHT) { frag.appendChild(document.createTextNode(seg.text)); continue; }
     const span = document.createElement("span");
     span.className = `tok ${seg.weight > 0 ? "f" : "r"}`;
     span.style.setProperty("--w", (0.35 + 0.65 * strength).toFixed(3));
@@ -77,13 +154,13 @@ function renderHighlights(segments) {
   annotated.appendChild(frag);
 }
 
-function renderTerms(listEl, terms) {
-  clear(listEl);
+function renderTerms(list, terms) {
+  clear(list);
   if (!terms.length) {
     const li = document.createElement("li");
     li.className = "empty";
     li.textContent = "None";
-    listEl.appendChild(li);
+    list.appendChild(li);
     return;
   }
   const maxAbs = Math.max(...terms.map((t) => Math.abs(t.weight)));
@@ -93,83 +170,19 @@ function renderTerms(listEl, terms) {
     word.textContent = t.term;
     const bar = document.createElement("span");
     bar.className = "bar";
-    bar.style.width = `${Math.max(6, (Math.abs(t.weight) / maxAbs) * 64)}px`;
-    bar.title = t.weight.toFixed(3);
+    bar.style.width = `${Math.max(8, (Math.abs(t.weight) / maxAbs) * 80)}px`;
     li.append(word, bar);
-    listEl.appendChild(li);
+    list.appendChild(li);
   }
 }
 
-const TITLES = { FAKE: "Likely fake", REAL: "Likely real", UNCERTAIN: "Uncertain" };
+const TEXT_VERDICT = {
+  FAKE: { tone: "fake", title: "Likely fake" },
+  REAL: { tone: "real", title: "Likely real" },
+  UNCERTAIN: { tone: "unsure", title: "Uncertain" },
+};
 
-function renderResult(r) {
-  verdict.dataset.state = r.label;
-  setText($("verdict-label"), TITLES[r.label] || r.label);
-  setText($("verdict-text"), r.verdict);
-  $("needle").style.left = `${r.prob_fake * 100}%`;
-
-  const score = $("score");
-  clear(score);
-  const strong = document.createElement("strong");
-  strong.textContent = pct(r.prob_fake);
-  score.append("Fake-news score: ", strong, ` (based on ${pct(r.known_word_ratio)} of words the model knows)`);
-  score.hidden = false;
-
-  const warnings = $("warnings");
-  clear(warnings);
-  for (const w of r.warnings) {
-    const li = document.createElement("li");
-    li.textContent = w;
-    warnings.appendChild(li);
-  }
-
-  renderTerms($("fake-terms"), r.top_fake_terms);
-  renderTerms($("real-terms"), r.top_real_terms);
-  renderHighlights(r.highlights);
-
-  $("evidence").hidden = false;
-  $("factcheck").hidden = false;
-  $("imagecheck").hidden = !imageLoaded;
-  $("legend").hidden = false;
-  textarea.hidden = true;
-  annotated.hidden = false;
-  editBtn.hidden = false;
-  const fcResults = $("factcheck-results");
-  if (fcResults) clear(fcResults);
-}
-
-function backToEditing() {
-  requestId++; // ignore any answer still on its way for the old text
-  textarea.hidden = false;
-  annotated.hidden = true;
-  editBtn.hidden = true;
-  $("legend").hidden = true;
-  // Old results no longer describe the text being edited, so reset them.
-  verdict.dataset.state = "idle";
-  setText($("verdict-label"), "No text analyzed yet");
-  setText($("verdict-text"), "Paste some news text and choose Analyze text.");
-  $("score").hidden = true;
-  clear($("warnings"));
-  $("evidence").hidden = true;
-  $("factcheck").hidden = true;
-  $("imagecheck").hidden = true;
-  textarea.focus();
-}
-
-// ---------- API calls
-async function postJSON(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  let data = {};
-  try { data = await res.json(); } catch { /* non-JSON error page */ }
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Request failed (${res.status}).`);
-  return data;
-}
-
-form.addEventListener("submit", async (e) => {
+textForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = textarea.value.trim();
   if (text.split(/\s+/).filter(Boolean).length < 3) {
@@ -179,55 +192,48 @@ form.addEventListener("submit", async (e) => {
   }
   showError("");
   const myId = ++requestId;
-  analyzeBtn.disabled = true;
-  setText(analyzeBtn, "Analyzing…");
+  textBtn.disabled = true;
+  setText(textBtn, "Checking…");
   try {
-    const result = await postJSON("/api/analyze", { text });
-    if (myId === requestId) renderResult(result); // drop answers to older requests
+    const r = await postJSON("/api/analyze", { text });
+    if (myId !== requestId) return;
+    const v = TEXT_VERDICT[r.label] || TEXT_VERDICT.UNCERTAIN;
+    renderHighlights(r.highlights);
+    renderTerms($("fake-terms"), r.top_fake_terms);
+    renderTerms($("real-terms"), r.top_real_terms);
+    textarea.hidden = true;
+    annotated.hidden = false;
+    editBtn.hidden = false;
+    $("why-text").hidden = false;
+    $("next-text").hidden = false;
+    showVerdict({ tone: v.tone, kind: "News text", title: v.title, summary: r.verdict,
+      score: r.prob_fake, caption: "fake score", notes: r.warnings });
+    const fc = $("factcheck-results");
+    if (fc) clear(fc);
   } catch (err) {
     if (myId === requestId) showError(err.message || "Something went wrong. Try again.");
   } finally {
-    if (myId === requestId) {
-      analyzeBtn.disabled = false;
-      setText(analyzeBtn, "Analyze text");
-    }
+    if (myId === requestId) { textBtn.disabled = false; setText(textBtn, "Check text"); }
   }
 });
 
-editBtn.addEventListener("click", backToEditing);
-textarea.addEventListener("input", updateCount);
-
-document.querySelectorAll("[data-example]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    removeImage();
-    backToEditing();
-    textarea.value = EXAMPLES[btn.dataset.example] || "";
-    updateCount();
-    form.requestSubmit();
-  });
-});
-
-// ---------- fact-check lookup (only present when the server has an API key)
+// fact-check search (only when the server has an API key)
 const fcBtn = $("factcheck-btn");
 if (fcBtn) {
   fcBtn.addEventListener("click", async () => {
     const out = $("factcheck-results");
     clear(out);
-    // Fact-check search works best with one short claim: use the first line or
-    // sentence that reads like a claim (5+ words). In screenshots the first
-    // line is often a user name or a date, so it is skipped.
     const all = textarea.value.trim().replace(/\s+/g, " ");
     const parts = textarea.value.trim().split(/\n|(?<=[.!?])\s/).map((s) => s.trim());
-    let firstLine = parts.find((s) => s.split(/\s+/).length >= 5) || all;
-    firstLine = firstLine.slice(0, 200);
+    const query = (parts.find((s) => s.split(/\s+/).length >= 5) || all).slice(0, 200);
     fcBtn.disabled = true;
     setText(fcBtn, "Searching…");
     try {
-      const { results } = await postJSON("/api/factcheck", { query: firstLine });
+      const { results } = await postJSON("/api/factcheck", { query });
       if (!results.length) {
         const p = document.createElement("p");
         p.className = "muted";
-        p.textContent = "No published fact-checks match this text. That doesn't mean it's true: many claims are never checked.";
+        p.textContent = "No published fact-checks match. That doesn't make it true: many claims are never checked.";
         out.appendChild(p);
       }
       for (const r of results) {
@@ -237,10 +243,9 @@ if (fcBtn) {
         rating.className = "fc-rating";
         rating.textContent = `${r.publisher || "Fact-checker"}: ${r.rating || "rated"}`;
         const claim = document.createElement("p");
-        claim.className = "fc-claim";
         claim.textContent = r.claim;
         const link = document.createElement("a");
-        link.href = r.url; // server only passes http(s) links
+        link.href = r.url; // the server only passes http(s) links
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.textContent = "Read the fact-check";
@@ -259,111 +264,137 @@ if (fcBtn) {
   });
 }
 
-// ---------- screenshot upload (text is read in the browser by ocr.js)
+// =============================================================== image mode
+const imageForm = $("image-form");
 const imageInput = $("image-input");
-const shot = $("shot");
-const shotImg = $("shot-img");
-const shotStatus = $("shot-status");
-const shotProgress = $("shot-progress");
-let imageLoaded = false;
-let ocrRun = 0; // newer uploads win over slower, older ones
+const dropzone = $("dropzone");
+const preview = $("drop-preview");
+const imageBtn = $("image-btn");
+const TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif"];
+const MAX_BYTES = 10 * 1024 * 1024;
+let chosen = null;
 
-const OCR_STEPS = {
-  "loading tesseract core": "Loading the text reader (first time only)…",
-  "loading language traineddata": "Loading the English text model (first time only)…",
-  "initializing api": "Starting the text reader…",
-  "recognizing text": "Reading text from the image…",
-};
-
-function removeImage() {
-  ocrRun++;
-  imageLoaded = false;
-  if (shotImg.src) URL.revokeObjectURL(shotImg.src);
-  shotImg.removeAttribute("src");
-  shot.hidden = true;
+function clearImage() {
+  chosen = null;
   imageInput.value = "";
-  $("imagecheck").hidden = true;
+  if (preview.src) URL.revokeObjectURL(preview.src);
+  preview.removeAttribute("src");
+  preview.hidden = true;
+  $("drop-empty").hidden = false;
+  setText($("file-name"), "No image chosen");
+  imageBtn.disabled = true;
 }
 
-async function handleImage(file) {
-  try {
-    window.TruthLensOCR.check(file);
-  } catch (err) {
-    showError(err.message);
-    return;
-  }
-  const run = ++ocrRun;
+function chooseImage(file) {
   showError("");
-  backToEditing();
-  if (shotImg.src) URL.revokeObjectURL(shotImg.src);
-  shotImg.src = URL.createObjectURL(file);
-  shot.hidden = false;
-  imageLoaded = true;
-  shotProgress.hidden = false;
-  shotProgress.value = 0;
-  setText(shotStatus, "Preparing the image…");
-  analyzeBtn.disabled = true;
-
-  try {
-    const { text, confidence } = await window.TruthLensOCR.read(file, (m) => {
-      if (run !== ocrRun) return;
-      setText(shotStatus, OCR_STEPS[m.status] || "Reading text from the image…");
-      if (typeof m.progress === "number") shotProgress.value = m.progress;
-    });
-    if (run !== ocrRun) return;
-    shotProgress.hidden = true;
-    const words = text.split(/\s+/).filter(Boolean).length;
-    if (words < 3) {
-      setText(shotStatus, "Found little or no readable text in this image.");
-      showError("No readable text was found. Try a sharper screenshot, or type the post's text in the box.");
-      return;
-    }
-    setText(shotStatus,
-      `Read ${words} words from the image` +
-      (confidence < 70 ? " (low confidence: check the text for mistakes and edit it if needed)." : ". You can edit the text and analyze again."));
-    textarea.value = text.slice(0, maxChars);
-    updateCount();
-    analyzeBtn.disabled = false;
-    form.requestSubmit();
-  } catch (err) {
-    if (run !== ocrRun) return;
-    shotProgress.hidden = true;
-    setText(shotStatus, "Couldn't read this image.");
-    showError(err.message || "Couldn't read the text in this image.");
-  } finally {
-    if (run === ocrRun) analyzeBtn.disabled = false;
-  }
+  resetResult();
+  if (!file) return;
+  if (!TYPES.includes(file.type)) { showError("Use a JPG, PNG, WEBP, BMP or GIF image."); return; }
+  if (file.size > MAX_BYTES) { showError("That image is over 10 MB. Use a smaller one."); return; }
+  chosen = file;
+  if (preview.src) URL.revokeObjectURL(preview.src);
+  preview.src = URL.createObjectURL(file);
+  preview.hidden = false;
+  $("drop-empty").hidden = true;
+  setText($("file-name"), `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+  imageBtn.disabled = false;
 }
 
-imageInput.addEventListener("change", () => {
-  if (imageInput.files[0]) handleImage(imageInput.files[0]);
+imageInput.addEventListener("change", () => chooseImage(imageInput.files[0]));
+dropzone.addEventListener("dragover", (e) => {
+  if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); dropzone.classList.add("dropping"); }
 });
-$("shot-remove").addEventListener("click", () => {
-  removeImage();
-  backToEditing();
-});
-
-// Drag and drop onto the text area, and paste (Ctrl/Cmd+V) of an image.
-form.addEventListener("dragover", (e) => {
-  if ([...e.dataTransfer.types].includes("Files")) {
-    e.preventDefault();
-    form.classList.add("dropping");
-  }
-});
-form.addEventListener("dragleave", () => form.classList.remove("dropping"));
-form.addEventListener("drop", (e) => {
-  form.classList.remove("dropping");
-  const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
-  if (file) {
-    e.preventDefault();
-    handleImage(file);
-  }
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dropping"));
+dropzone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropzone.classList.remove("dropping");
+  chooseImage([...e.dataTransfer.files].find((f) => f.type.startsWith("image/")));
 });
 document.addEventListener("paste", (e) => {
   const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
-  if (item) {
-    e.preventDefault();
-    handleImage(item.getAsFile());
+  if (!item) return;
+  e.preventDefault();
+  selectTab($("tab-image"));
+  chooseImage(item.getAsFile());
+});
+
+// image viewer: original / AI heatmap / edit map
+const viewBase = $("view-base");
+const viewOverlay = $("view-overlay");
+const viewButtons = [...document.querySelectorAll("#view-switch [data-view]")];
+let maps = { ai: null, edit: null };
+const VIEW_CAPTIONS = {
+  original: "The image as analysed.",
+  ai: "Brighter, warmer areas raised the AI-generated score most.",
+  edit: "Error level map: bright areas compress differently from the rest of the image. Edges and fine texture are naturally bright; look for patches that stand out from similar surroundings.",
+};
+function setView(view) {
+  for (const b of viewButtons) b.setAttribute("aria-checked", String(b.dataset.view === view));
+  const src = view === "original" ? null : maps[view];
+  if (src) { viewOverlay.src = src; viewOverlay.hidden = false; } else { viewOverlay.hidden = true; }
+  viewBase.parentElement.classList.toggle("mapped", Boolean(src));
+  setText($("view-caption"), VIEW_CAPTIONS[view]);
+}
+viewButtons.forEach((b) => b.addEventListener("click", () => { if (!b.disabled) setView(b.dataset.view); }));
+
+const IMAGE_VERDICT = {
+  AI_GENERATED: { tone: "ai" },
+  EDITED: { tone: "edit" },
+  REAL: { tone: "real" },
+  UNCERTAIN: { tone: "unsure" },
+  UNKNOWN: { tone: "unsure" },
+};
+
+function setMeter(id, signal) {
+  const m = $(id);
+  const fill = m.querySelector(".meter-fill");
+  const value = m.querySelector(".meter-value");
+  if (signal.available) {
+    m.classList.remove("off");
+    fill.style.width = `${Math.round(signal.prob * 100)}%`;
+    setText(value, pct(signal.prob));
+  } else {
+    m.classList.add("off");
+    fill.style.width = "0";
+    setText(value, "n/a");
+  }
+}
+
+imageForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!chosen) { showError("Choose an image first."); return; }
+  showError("");
+  const myId = ++requestId;
+  imageBtn.disabled = true;
+  setText(imageBtn, "Checking…");
+  try {
+    const form = new FormData();
+    form.append("file", chosen);
+    const r = await postForm("/api/image", form);
+    if (myId !== requestId) return;
+    maps = { ai: r.ai.map_png, edit: r.edit.map_png };
+    viewBase.src = r.preview_png;
+    for (const b of viewButtons) b.disabled = b.dataset.view !== "original" && !maps[b.dataset.view];
+    setView("original");
+    setMeter("meter-ai", r.ai);
+    setMeter("meter-edit", r.edit);
+    $("meters").hidden = false;
+    $("why-image").hidden = false;
+    $("next-image").hidden = false;
+    const scores = [r.ai, r.edit].filter((s) => s.available).map((s) => s.prob);
+    const notes = [...r.warnings];
+    for (const s of [r.ai, r.edit]) if (!s.available && s.note) notes.push(s.note);
+    showVerdict({
+      tone: (IMAGE_VERDICT[r.label] || IMAGE_VERDICT.UNKNOWN).tone,
+      kind: `Image, ${r.width} x ${r.height} ${r.format}`,
+      title: r.headline, summary: r.summary,
+      score: scores.length ? Math.max(...scores) : null,
+      caption: "fake score", notes,
+    });
+  } catch (err) {
+    if (myId === requestId) showError(err.message || "Something went wrong. Try again.");
+  } finally {
+    if (myId === requestId) { imageBtn.disabled = !chosen; setText(imageBtn, "Check image"); }
   }
 });
 

@@ -13,7 +13,7 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,10 +21,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
 from . import __version__, config, factcheck
+from .image_check import ImageChecker, ImageRejected
 from .model import FAKE_THRESHOLD, REAL_THRESHOLD, Predictor
 
 HERE = config.ROOT / "truthlens"
 MAX_BODY_BYTES = 64 * 1024  # a 20k-character article as JSON fits easily
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+BODY_LIMITS = {"/api/image": MAX_IMAGE_BYTES + 64 * 1024}  # room for multipart headers
 SHOW_API_DOCS = os.environ.get("TRUTHLENS_API_DOCS", "0") == "1"
 # Optional: name of a header your host sets to the real client IP
 # (e.g. "cf-connecting-ip"). If empty, the last X-Forwarded-For entry is used.
@@ -32,8 +35,8 @@ CLIENT_IP_HEADER = os.environ.get("CLIENT_IP_HEADER", "").strip().lower()
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self'; "
-        "img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; "
+        "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
+        "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
         "form-action 'self'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -47,6 +50,7 @@ SECURITY_HEADERS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.predictor = Predictor.load()  # load once at start-up, not per request
+    app.state.image_checker = ImageChecker()
     yield
 
 
@@ -110,6 +114,7 @@ class RateLimiter:
 LIMITERS = {
     "/api/analyze": RateLimiter(60),
     "/api/factcheck": RateLimiter(config.FACTCHECK_RATE_LIMIT_PER_MIN),
+    "/api/image": RateLimiter(20),
 }
 GLOBAL_LIMITERS = {"/api/factcheck": RateLimiter(int(os.environ.get("FACTCHECK_GLOBAL_PER_MIN", "120")))}
 
@@ -168,16 +173,12 @@ async def guard(request: Request, call_next):
         length = request.headers.get("content-length")
         if length is None:
             return _error(411, "Content-Length header is required.")
-        if not length.isdigit() or int(length) > MAX_BODY_BYTES:
+        if not length.isdigit() or int(length) > BODY_LIMITS.get(request.url.path, MAX_BODY_BYTES):
             return _error(413, "Request is too large.")
 
     response = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
-    if request.url.path.startswith("/static/vendor/"):
-        # Large third-party files (the ~11 MB OCR engine) never change between
-        # releases, so browsers may keep them for a week.
-        response.headers["Cache-Control"] = "public, max-age=604800"
     if request.headers.get("x-forwarded-proto") == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return response
@@ -220,6 +221,10 @@ async def index(request: Request):
         "fake_threshold": FAKE_THRESHOLD,
         "real_threshold": REAL_THRESHOLD,
         "version": __version__,
+        "image_models": {
+            "ai": request.app.state.image_checker.ai_model is not None,
+            "edit": request.app.state.image_checker.edit_model is not None,
+        },
     })
 
 
@@ -238,6 +243,20 @@ async def lookup(body: FactCheckIn):
         return {"results": await factcheck.search(body.query)}
     except factcheck.FactCheckUnavailable as exc:
         raise HTTPException(503, str(exc)) from None
+
+
+@app.post("/api/image")
+def check_image(request: Request, file: UploadFile = File(...)):
+    # Plain "def": decoding and analysis run in a worker thread.
+    data = file.file.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "That image is over 10 MB. Use a smaller one.")
+    if not data:
+        raise HTTPException(422, "The file is empty.")
+    try:
+        return asdict(request.app.state.image_checker.check(data))
+    except ImageRejected as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @app.get("/healthz")
