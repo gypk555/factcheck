@@ -78,5 +78,5 @@ async def csp(request, call_next):
 app.mount("/", StaticFiles(directory=ROOT / "web", html=True), name="web")
 
 if __name__ == "__main__":
-    print(f"\n  Preview: http://127.0.0.1:{PORT}/#connect=http%3A%2F%2F127.0.0.1%3A{PORT}%23key%3D{KEY}\n")
+    print(f"\n  Preview: http://127.0.0.1:{PORT}/\n  Connection code (paste it in the Connect box): http://127.0.0.1:{PORT}#key={KEY}\n")
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

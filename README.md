@@ -51,7 +51,7 @@ Both zips and the trained model stay in Google Drive, so you never upload them a
 ## Demo day
 
 1. Open the notebook in Colab (T4 GPU) and run **Boxes 1 to 4**. Boxes 1–2 take about a minute each now, because everything is loaded from Drive.
-2. Wait for the green box, then click **open the website, already connected**. The sidebar shows **Model online**.
+2. Wait for the green box. Copy the **connection code**, open the website, click **Connect**, paste it and press **Connect**. The sidebar shows **Model online**.
 3. Keep the Colab tab open. When you're done, run **Box 5**.
 
 Every run creates a new link and a new secret key. Old links stop working when Colab stops.
@@ -60,7 +60,7 @@ Every run creates a new link and a new secret key. Old links stop working when C
 
 ```bash
 uv sync
-uv run python dev/mock_server.py      # prints a link; open it (a FAKE model answers)
+uv run python dev/mock_server.py      # prints the address and a connection code (a FAKE model answers)
 uv run pytest -q                      # tests
 ```
 

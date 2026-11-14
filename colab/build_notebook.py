@@ -188,13 +188,12 @@ if not url:
     raise SystemExit('❌ Could not create the public link. Run Box 4 again.')
 
 CODE = f'{url}#key={KEY}'
-LINK = f"{SITE_URL.rstrip('/')}/#connect={urllib.parse.quote(CODE, safe='')}"
 display(HTML(f'''
 <div style="font:15px/1.5 sans-serif;padding:16px;border:2px solid #0f9d58;border-radius:10px">
   <b style="font-size:18px">✅ The model is online</b><br><br>
-  <b>Easiest:</b> <a href="{LINK}" target="_blank" style="font-size:16px">open the website</a> and press <b>Connect</b><br><br>
-  <b>Or</b> copy this connection code into the website's <i>Connect model</i> box:<br>
-  <code style="user-select:all;word-break:break-all">{CODE}</code><br><br>
+  1. Copy this connection code (click it to select it all):<br>
+  <code style="user-select:all;word-break:break-all;font-size:14px">{CODE}</code><br><br>
+  2. Open <a href="{SITE_URL}" target="_blank">{SITE_URL}</a>, click <b>Connect</b>, paste the code, press <b>Connect</b>.<br><br>
   Works only from <b>{SITE_URL}</b>. Keep this Colab tab open during the demo. Stop with Box 5.<br>
   <small>Before sharing this notebook with anyone: <i>Edit → Clear all outputs</i> (this box contains the secret key).</small>
 </div>'''))
@@ -223,7 +222,7 @@ def build():
         md(BOX3_MD),
         code("%%writefile /content/XFND-CLIP/server.py\n" + server_src),
         md("## Box 4: start the model and get the link\n"
-           "Wait for the green box, click **open the website**, then press **Connect**.\n\n"
+           "Wait for the green box, copy the connection code and paste it into the website's **Connect** box.\n\n"
            "First time only: after deploying the website, put its address in `SITE_URL` below."),
         code(BOX4),
         md("## Box 5: stop the server (after the demo)"),

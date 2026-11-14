@@ -35,8 +35,8 @@ function parseCode(code) {
   try { u = new URL(code); } catch { throw new Error("That doesn't look like a connection code. Copy it again from the notebook's green box."); }
   const key = new URLSearchParams(u.hash.slice(1)).get("key");
   const local = ["127.0.0.1", "localhost"].includes(u.hostname);
-  // Only the notebook's Cloudflare tunnel (or the local preview) is accepted, so a
-  // stranger's link can't point this site at their own server.
+  // Only a Cloudflare quick tunnel (or the local preview) is accepted. This is a
+  // format check, not proof of ownership: that's why codes are pasted by hand.
   const tunnel = u.protocol === "https:" && /^[a-z0-9-]+\.trycloudflare\.com$/.test(u.hostname);
   if (!tunnel && !(local && u.protocol === "http:")) {
     throw new Error("The connection code must be the https://….trycloudflare.com link printed by the notebook.");
@@ -127,7 +127,6 @@ function openConnect(message, code) {
   $("connect-code").focus();
 }
 $("connect-open").addEventListener("click", () => openConnect());
-dialog.addEventListener("close", () => connectError.classList.remove("info"));
 $("connect-close").addEventListener("click", () => dialog.close());
 $("disconnect-btn").addEventListener("click", () => { disconnect(); dialog.close(); });
 $("connect-form").addEventListener("submit", async (e) => {
@@ -140,7 +139,6 @@ $("connect-form").addEventListener("submit", async (e) => {
     await connectWith($("connect-code").value);
     dialog.close();
   } catch (err) {
-    connectError.classList.remove("info");
     setText(connectError, err.message);
     connectError.hidden = false;
   } finally {
@@ -170,21 +168,14 @@ window.addEventListener("hashchange", () => {
   window.scrollTo(0, 0);
 });
 
-// A link from the notebook looks like  #connect=<connection code>.
-// Use it, then remove it from the address bar (and browser history).
+// Connection codes are only ever pasted by hand from your own Colab output.
+// Links carrying a code (#connect=...) are ignored on purpose: anyone can create
+// a trycloudflare.com address, so a link from someone else could point this site
+// at their server. Such a link is just removed from the address bar.
 function handleConnectLink() {
-  const m = location.hash.match(/^#connect=(.+)$/);
-  if (!m) return false;
+  if (!/^#connect=/.test(location.hash)) return false;
   history.replaceState(null, "", `${location.pathname}#/check`);
   route();
-  let code = "";
-  try { code = decodeURIComponent(m[1]); } catch { /* malformed */ }
-  // Never connect silently from a link: show where it points and let the user confirm.
-  let note = "";
-  try { note = `This link connects to ${new URL(code).hostname}. Check it matches the Colab notebook's green box, then press Connect.`; }
-  catch { note = "This link isn't a valid connection code."; }
-  openConnect(note, code);
-  connectError.classList.add("info");
   return true;
 }
 
