@@ -1,104 +1,81 @@
-# TruthLens
+# XFND-CLIP: web interface
 
-An explainable fake news detector. Paste a headline or article, or upload a screenshot of a post, and TruthLens says whether it *reads like* fake news, highlights the exact words that pushed it each way, and (optionally) searches published fact-checks for the same claim.
+A website for **XFND-CLIP**, an explainable multimodal fake news detector for Indian news. You type a post's claim and add its picture; the model (running on a Colab GPU) says **FAKE** or **REAL** and shows why:
 
-College mini project. Classic machine learning (TF-IDF + Logistic Regression), trained on the WELFake dataset, with an honest cross-dataset test on LIAR2 (PolitiFact claims).
+- **Which words mattered**: each word is removed in turn to see how the fake score changes
+- **What the model relied on**: attention weights for text, image and text-image agreement
+- **Does the picture match the claim?**: CLIP similarity against the training average
+- **Which part of the image mattered**: Grad-CAM heatmap from ResNet-50
 
-## Results at a glance
+The site has four screens: **Check a post**, **How it works**, **Results** (test accuracy of 10 models, the 5-post live test, the most confident mistakes) and **History** (posts checked in this browser).
 
-| Test set | Accuracy | Macro F1 | Always-guess-the-commonest-label baseline |
-|---|---|---|---|
-| WELFake, unseen articles (9,617) | **94.1%** | 0.940 | 53.7% |
-| WELFake, unseen headlines only (9,497) | 84.7% | 0.845 | |
-| LIAR2, PolitiFact claims (1,565) | 53.2% | 0.527 | 61.5% |
+## How the pieces fit
 
-With the app's "Uncertain" zone (scores between 35% and 65%), it gives a verdict on 95.4% of unseen articles and is right 95.9% of the time when it does.
+```
+ Website (Render, always on)  ──── HTTPS + access key ────►  Model server (Google Colab, T4 GPU)
+ web/  static HTML/CSS/JS                                      colab/server.py  +  your model code
+                                                               exposed with a temporary Cloudflare link
+```
 
-The model is strong on news written like its training data, and **worse than a trivial guess** on short political claims from another source. It learns writing style, not facts. Full write-up: [`docs/report.md`](docs/report.md).
+The website is static, so it is free and always online. The model is too big for free hosting, so it runs in Colab only while the notebook is open. Without Colab, the site still shows How it works, Results and History, and says the model is offline.
 
-## Run it locally
+## Folder
 
-Needs [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 for you).
+| Path | What it is |
+|---|---|
+| `web/` | The website (no build step) |
+| `web/data/` | Results from `XFND_extra.zip`: `metrics.json`, `live_test.csv`, `wrong_examples.csv`, figures |
+| `colab/XFND_CLIP_Server.ipynb` | **The notebook to run on demo day** |
+| `colab/server.py` | The model server (the notebook contains a copy of it) |
+| `colab/build_notebook.py` | Regenerates the notebook after changing `server.py` |
+| `model/` | The XFND-CLIP project code (from `XFND-CLIP.zip`); one change: the model file is loaded with `weights_only=True` |
+| `dev/mock_server.py` | Local preview with a fake model, for working on the design |
+| `tests/` | Automated checks |
+
+## One-time setup
+
+### 1. Put the site online (Render)
+1. Push this folder to a GitHub repository.
+2. On [render.com](https://render.com): **New → Blueprint**, pick the repository. `render.yaml` does the rest.
+3. Note the address Render gives you, e.g. `https://xfnd-clip.onrender.com`.
+4. In `colab/build_notebook.py`, set `SITE_URL` to that address, run `uv run python colab/build_notebook.py`, and commit. (Or just edit `SITE_URL` in Box 4 inside Colab.)
+
+### 2. Train once and save the model to Google Drive (Colab)
+1. Open `colab/XFND_CLIP_Server.ipynb` in Google Colab with the Google account you'll use on demo day.
+2. `Runtime → Change runtime type → T4 GPU`.
+3. Run **Box 1**: upload `XFND-CLIP.zip` when asked.
+4. Run **Box 2**: upload `archive.zip` (the IFND dataset) when asked. It trains once (30–40 min) and saves `xfnd_clip.pt` to **Google Drive → XFND**.
+
+Both zips and the trained model stay in Google Drive, so you never upload them again. The dataset never needs to be on your own computer.
+
+## Demo day
+
+1. Open the notebook in Colab (T4 GPU) and run **Boxes 1 to 4**. Boxes 1–2 take about a minute each now, because everything is loaded from Drive.
+2. Wait for the green box, then click **open the website, already connected**. The sidebar shows **Model online**.
+3. Keep the Colab tab open. When you're done, run **Box 5**.
+
+Every run creates a new link and a new secret key. Old links stop working when Colab stops.
+
+## Working on the website locally
 
 ```bash
-uv sync                                           # install the app's dependencies
-uv run uvicorn truthlens.app:app --reload         # open http://127.0.0.1:8000
+uv sync
+uv run python dev/mock_server.py      # prints a link; open it (a FAKE model answers)
+uv run pytest -q                      # tests
 ```
 
-The trained model is already in `models/`, so no training is needed to run the app.
-
-Optional fact-check panel: copy `.env.example` to `.env`, add a free [Google Fact Check Tools API](https://developers.google.com/fact-check/tools/api) key, then start with `--env-file .env`.
-
-## Retrain and regenerate the report figures
-
-```bash
-uv run --group train python scripts/train.py      # about 2 minutes on a laptop, no GPU
-```
-
-This downloads the datasets into `data/raw/` (not committed), trains and compares Naive Bayes, Logistic Regression and Linear SVM, then writes:
-
-- `models/model.json`, `models/weights.npz`: the demo model
-- `reports/metrics.json`: every number in the report
-- `reports/figures/*.png`: confusion matrices, model comparison, top words
-
-## Tests
-
-```bash
-uv run pytest -q
-```
-
-## Deploy on Render (free)
-
-1. Push this repository to GitHub.
-2. In Render: **New → Blueprint**, pick the repository. `render.yaml` sets everything up (build: `pip install -r requirements.txt`, start: `uvicorn`, health check `/healthz`).
-3. Optional: in the service's **Environment** tab, set `GOOGLE_FACTCHECK_API_KEY`.
-
-Rate limits are per visitor IP. Proxy headers are trusted only on Render (which sets `RENDER=true`) or when `TRUST_PROXY=1`; otherwise the connection's own address is used. On Render the IP is the last `X-Forwarded-For` entry. If every visitor seems to share one limit there, set `CLIENT_IP_HEADER` (for example `cf-connecting-ip`) in the Environment tab. Fact-check look-ups also have a site-wide cap (`FACTCHECK_GLOBAL_PER_MIN`, default 120) to protect the API key's quota.
-
-Free instances sleep after inactivity; the first visit after a pause takes about a minute. Open the site a few minutes before a demo.
-
-If you change dependencies, regenerate `requirements.txt`:
-`uv export --no-dev --no-hashes --no-emit-project -o requirements.txt`
-
-## Screenshots of posts
-
-Choose **Upload a screenshot**, or drop or paste an image. The text in the image is read in the visitor's browser with Tesseract.js (OCR), so the image is never sent to the server. The extracted text appears in the box (edit it if the OCR made mistakes) and is analysed and fact-checked like typed text.
-
-TruthLens does not judge the photo itself. For that, the page guides the visitor to a reverse image search (Google Lens, TinEye) to find where the picture appeared before. No free API accepts an uploaded image for this.
-
-## How it works
-
-```
-text ─► clean_text() ─► TF-IDF (words + word pairs) ─► Logistic Regression ─► P(fake)
-          │                                                  │
-          └ removes source give-aways                        └ per-word contribution = tfidf × weight
-            ("(Reuters)", "Featured image via",                (exact explanation, shown as highlights)
-             outlet names, URLs, @handles)
-```
-
-- `truthlens/text.py`: cleaning shared by training and the app
-- `truthlens/model.py`: loading, prediction and explanation (pure NumPy, no pickle)
-- `truthlens/factcheck.py`: optional Google Fact Check Tools lookup
-- `truthlens/app.py`: FastAPI server and security settings
-- `truthlens/templates`, `truthlens/static`: the web page
-- `truthlens/static/ocr.js`: reads the text in an uploaded screenshot, in the browser
-- `truthlens/static/vendor/tesseract`: self-hosted Tesseract.js OCR engine (about 11 MB, loaded only when an image is uploaded)
-- `scripts/train.py`: data preparation, training, evaluation and figures
+The mock model invents numbers from keywords. It exists only to check the design.
 
 ## Security
 
-- The model is stored as JSON + NumPy arrays and loaded with `allow_pickle=False`, so loading it can't run code.
-- Strict Content-Security-Policy (no inline scripts or styles, no third-party hosts). The only relaxations are `'wasm-unsafe-eval'` (WebAssembly for the OCR engine; JavaScript `eval` stays blocked), same-site workers, and `blob:` images for the local preview. The page inserts all text with `textContent`.
-- Uploaded images stay in the browser. Only PNG, JPG, WEBP, GIF and BMP up to 10 MB are accepted, and very large images are scaled down before OCR.
-- Input limits (20,000 characters, 64 KB body, `Content-Length` required so chunked uploads can't bypass the cap), and short validation errors that don't echo input.
-- Linear-time cleaning regexes (tested against ReDoS inputs). Prediction runs in a worker thread, so one long request can't block other visitors.
-- Per-visitor rate limits, applied before the body is read. The API key stays on the server and is never returned in errors.
-- Only `http(s)` links from the fact-check API reach the page.
-- API docs are off in production (set `TRUTHLENS_API_DOCS=1` to enable locally).
+- The Colab server only answers requests that carry the secret key from the notebook (a new one every run).
+- Uploads: images only (JPG, PNG, WEBP, BMP, GIF), 10 MB and 24 megapixels at most; claims of 3 to 1,000 characters.
+- The website has a strict Content-Security-Policy (no inline code, no third-party scripts) and inserts all text safely (never as HTML).
+- History is kept in the visitor's own browser; nothing is stored on a server.
+- The model file is loaded with `weights_only=True`, so it can only contain numbers, not code.
 
-## Data and credits
+## Credits
 
-- **WELFake**: Verma et al., *WELFake: Word Embedding Over Linguistic Features for Fake News Detection*, IEEE Transactions on Computational Social Systems, 2021. Copy used: [davanstrien/WELFake](https://huggingface.co/datasets/davanstrien/WELFake). Its dataset card says label 1 = real, but the data shows 1 = fake (21,266 of 21,282 Reuters articles are label 0), so this project treats 1 as fake.
-- **LIAR2**: [chengxuphd/liar2](https://huggingface.co/datasets/chengxuphd/liar2) (Apache-2.0), an extension of LIAR (Wang, 2017).
-- OCR: [Tesseract.js](https://github.com/naptha/tesseract.js) 5.1.1 and tesseract.js-core (Apache-2.0), English data from `@tesseract.js-data/eng` (MIT), self-hosted.
-- Fonts: Atkinson Hyperlegible and Source Serif 4, both SIL Open Font License, self-hosted.
+- Base paper: Y. Zhou, Y. Yang, Q. Ying, Z. Qian, X. Zhang, "Multimodal Fake News Detection via CLIP-Guided Learning", IEEE ICME 2023.
+- Dataset: D. K. Sharma, S. Garg, "IFND: a benchmark dataset for fake news detection", *Complex & Intelligent Systems* 9, 2023.
+- Fonts: Atkinson Hyperlegible and Source Serif 4 (SIL Open Font License), self-hosted.

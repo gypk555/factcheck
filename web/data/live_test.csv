@@ -1,0 +1,6 @@
+#,claim,fact_check,model,P(fake),clip_sim
+1,Union Budget 2026-27 document leaked on Telegram before presentation in Parliament,FAKE,REAL,0.393,0.33
+2,"Kiren Rijiju and Arjun Ram Meghwal on London trip with judges, playing badminton",FAKE,REAL,0.11,0.267
+3,Narendra modi reveals free scooters for women,FAKE,REAL,0.229,0.293
+4,"Kiren Rijiju and Arjun Ram Meghwal attend All India Judges' Badminton Championship at Thyagaraj Stadium, New Delhi",REAL,REAL,0.278,0.18
+5,Finance Minister Nirmala Sitharaman presents Union Budget 2026-27 in Parliament,REAL,REAL,0.011,0.365

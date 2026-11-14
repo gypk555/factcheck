@@ -1,0 +1,4 @@
+file,true,model,P(fake),text
+results/figures/explanations/wrong_1.png,REAL,FAKE,0.999,Google Maps is getting a new look
+results/figures/explanations/wrong_2.png,REAL,FAKE,0.992,"""Epic Games"" ? ? ? "" ? "" ? ?"
+results/figures/explanations/wrong_3.png,REAL,FAKE,0.97,Political donations through Electoral Bonds are 10 times the contributions received by Electoral Trusts

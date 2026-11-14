@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XFND-CLIP</title>
+  <meta name="description" content="Explainable multimodal fake news detection for Indian news: check a post's claim and image, and see why the model decided.">
+  <link rel="preload" href="assets/fonts/atkinson-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/style.css">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 10h8M8 13h5"/></symbol>
+    <symbol id="i-how" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1.5"/><rect x="15" y="4" width="6" height="6" rx="1.5"/><rect x="9" y="14" width="6" height="6" rx="1.5"/><path d="M6 10v2h12v-2M12 12v2"/></symbol>
+    <symbol id="i-results" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-fake" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></symbol>
+    <symbol id="i-real" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  </svg>
+
+  <div class="shell">
+    <!-- ================= sidebar / bottom bar ================= -->
+    <nav class="side" aria-label="Main">
+      <a class="brand" href="#/check">
+        <span class="brand-mark" aria-hidden="true">X</span>
+        <span><strong>XFND-CLIP</strong><small>Explainable fake news detector</small></span>
+      </a>
+      <ul class="nav">
+        <li><a href="#/check" data-route="check"><svg aria-hidden="true"><use href="#i-check"/></svg><span>Check a post</span></a></li>
+        <li><a href="#/how" data-route="how"><svg aria-hidden="true"><use href="#i-how"/></svg><span>How it works</span></a></li>
+        <li><a href="#/results" data-route="results"><svg aria-hidden="true"><use href="#i-results"/></svg><span>Results</span></a></li>
+        <li><a href="#/history" data-route="history"><svg aria-hidden="true"><use href="#i-history"/></svg><span>History</span><b class="count-badge" id="history-count" hidden></b></a></li>
+      </ul>
+      <div class="model-status" id="model-status" data-state="offline">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="status-text"><strong id="status-title">Model offline</strong><small id="status-detail">Run the Colab notebook to connect</small></span>
+        <button type="button" class="btn btn-small" id="connect-open">Connect</button>
+      </div>
+    </nav>
+
+    <main class="main" id="main" tabindex="-1">
+      <!-- ================= CHECK ================= -->
+      <section class="view" id="view-check" data-view="check" aria-labelledby="check-title">
+        <header class="view-head">
+          <h1 id="check-title">Check a post</h1>
+          <p>Type the claim exactly as it was shared, and add the picture that came with it.</p>
+        </header>
+
+        <form class="card compose" id="check-form" novalidate>
+          <div class="compose-text">
+            <label for="claim" class="field-label">Claim</label>
+            <textarea id="claim" maxlength="1000" aria-describedby="claim-count" placeholder="e.g. Union Budget 2026-27 document leaked on Telegram before presentation in Parliament"></textarea>
+            <div class="field-foot">
+              <span id="claim-count">0 / 60 words</span>
+              <span class="hint">Use the post's own words, not a fact-checker's headline.</span>
+            </div>
+          </div>
+          <div class="compose-image">
+            <span class="field-label" id="image-label">Image <em>(optional)</em></span>
+            <input type="file" id="image-input" class="visually-hidden" accept="image/jpeg,image/png,image/webp,image/bmp,image/gif" aria-labelledby="image-label">
+            <label for="image-input" class="drop" id="drop">
+              <span class="drop-empty" id="drop-empty">
+                <svg aria-hidden="true"><use href="#i-upload"/></svg>
+                <strong>Add the post's image</strong>
+                <small>Drop, paste or browse. JPG, PNG, WEBP up to 10 MB</small>
+              </span>
+              <img id="drop-preview" alt="" hidden>
+            </label>
+            <button type="button" class="link-btn" id="image-remove" hidden>Remove image</button>
+          </div>
+          <div class="compose-foot">
+            <details class="samples">
+              <summary>Try a claim from the live test</summary>
+              <div class="samples-menu" id="samples-menu"></div>
+            </details>
+            <button type="submit" class="btn btn-primary" id="analyse-btn">Analyse post</button>
+          </div>
+        </form>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+
+        <div class="busy card" id="busy" hidden aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <div><strong>Analysing on the Colab GPU…</strong><small>Reading the text with BERT, the image with ResNet-50 and CLIP, then testing every word.</small></div>
+        </div>
+
+        <section class="result" id="result" hidden aria-labelledby="verdict-title" tabindex="-1">
+          <div class="card verdict" id="verdict" data-label="REAL">
+            <div class="verdict-main">
+              <p class="verdict-chip"><svg aria-hidden="true"><use id="verdict-icon" href="#i-real"/></svg><span id="verdict-chip-text">Model verdict</span></p>
+              <h2 id="verdict-title">REAL</h2>
+              <p class="verdict-claim" id="verdict-claim"></p>
+            </div>
+            <div class="verdict-score">
+              <div class="score-num"><strong id="score-value">–</strong><span>chance of fake</span></div>
+              <div class="score-bar" aria-hidden="true">
+                <span class="score-fill" id="score-fill"></span>
+                <span class="score-mid" title="Decision threshold: 50%"></span>
+              </div>
+              <div class="score-ends"><span>Real</span><span>50%</span><span>Fake</span></div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card panel" id="panel-words">
+              <h3>Which words mattered</h3>
+              <p class="panel-sub">Each word was removed in turn to see how the fake score changed. <span class="key key-fake">pushes to fake</span> <span class="key key-real">pushes to real</span></p>
+              <p class="claim-marked" id="claim-marked"></p>
+              <ol class="word-bars" id="word-bars"></ol>
+            </div>
+
+            <div class="card panel" id="panel-modality">
+              <h3>What the model relied on</h3>
+              <p class="panel-sub">Attention weights of the three branches (they add up to 100%).</p>
+              <div class="mod-bars" id="mod-bars"></div>
+              <div class="clip" id="clip-box">
+                <h4>Does the picture match the claim?</h4>
+                <div class="clip-meter" aria-hidden="true"><span class="clip-avg" id="clip-avg"></span><span class="clip-dot" id="clip-dot"></span></div>
+                <p id="clip-text" class="panel-sub"></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card panel" id="panel-image">
+            <div class="panel-head">
+              <h3>Which part of the image mattered</h3>
+              <div class="seg" role="radiogroup" aria-label="Image view">
+                <button type="button" role="radio" aria-checked="false" data-view="original">Original</button>
+                <button type="button" role="radio" aria-checked="true" data-view="heat">Grad-CAM heatmap</button>
+              </div>
+            </div>
+            <figure class="viewer">
+              <img id="view-base" alt="The post image">
+              <img id="view-heat" alt="" class="heat">
+            </figure>
+            <p class="panel-sub">Warm areas pushed the decision most (Grad-CAM on ResNet-50). The model looks at the centre square of the image.</p>
+          </div>
+
+          <p class="disclaimer">A research prototype trained on the IFND dataset. Always confirm with a fact-checker such as <a href="https://factcheck.pib.gov.in/" target="_blank" rel="noopener noreferrer">PIB Fact Check</a> before sharing.</p>
+          <div class="result-actions">
+            <button type="button" class="btn btn-ghost" id="again-btn">Check another post</button>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================= HOW ================= -->
+      <section class="view" id="view-how" data-view="how" hidden aria-labelledby="how-title">
+        <header class="view-head">
+          <h1 id="how-title">How XFND-CLIP works</h1>
+          <p>It reads a post's headline and the image shared with it, decides whether the post is fake, and explains why.</p>
+        </header>
+
+        <div class="card flow" aria-label="Model pipeline">
+          <ol class="flow-steps">
+            <li class="flow-col">
+              <h3>1. Input</h3>
+              <div class="node node-text">Claim text</div>
+              <div class="node node-image">Image <small>(optional)</small></div>
+            </li>
+            <li class="flow-col">
+              <h3>2. Frozen encoders</h3>
+              <div class="node node-text">BERT <small>768-d text meaning</small></div>
+              <div class="node node-image">ResNet-50 <small>2048-d image content</small></div>
+              <div class="node node-mm">CLIP ViT-B/32 <small>text + image in one space</small></div>
+            </li>
+            <li class="flow-col">
+              <h3>3. Three branches</h3>
+              <div class="node node-text">Text branch</div>
+              <div class="node node-image">Image branch</div>
+              <div class="node node-mm">Text-image branch <small>agreement, |t−i|, t×i</small></div>
+            </li>
+            <li class="flow-col">
+              <h3>4. Attention</h3>
+              <div class="node node-neutral">Weights each branch <small>knows if the image is missing</small></div>
+            </li>
+            <li class="flow-col">
+              <h3>5. Verdict</h3>
+              <div class="node node-out">FAKE or REAL <small>with P(fake)</small></div>
+            </li>
+          </ol>
+          <p class="panel-sub">Only the small fusion network is trained; the big encoders stay frozen, so training fits on a free Colab GPU.</p>
+        </div>
+
+        <h2 class="section-title">How it explains a decision</h2>
+        <div class="explain-grid">
+          <div class="card mini"><h3>Word importance</h3><p>Each word is removed in turn. If the fake score drops, that word was pushing towards fake.</p></div>
+          <div class="card mini"><h3>Grad-CAM heatmap</h3><p>Traces the fake decision back through ResNet-50 to the image regions that drove it.</p></div>
+          <div class="card mini"><h3>Modality weights</h3><p>The attention scores: how much the text, the image and their agreement counted.</p></div>
+          <div class="card mini"><h3>CLIP similarity</h3><p>Measures whether the picture fits the headline. Real photos reused with false captions often fit poorly.</p></div>
+        </div>
+
+        <h2 class="section-title">What is new compared with the base paper</h2>
+        <div class="card">
+          <p class="panel-sub">Base paper: Zhou et al., "Multimodal Fake News Detection via CLIP-Guided Learning", IEEE ICME 2023 (FND-CLIP).</p>
+          <ol class="numbered">
+            <li><strong>Cross-modal consistency features.</strong> The difference and product of the CLIP text and image embeddings show where text and image disagree.</li>
+            <li><strong>Availability-aware attention.</strong> The model knows when an image is missing (many IFND image links are dead) and relies on the text instead.</li>
+            <li><strong>Class-balanced focal loss</strong> for the remaining class imbalance.</li>
+            <li><strong>Explanation module.</strong> The base paper only outputs real or fake; XFND-CLIP shows why.</li>
+          </ol>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Data</h3>
+            <p>IFND, an Indian fake news dataset (Sharma &amp; Garg, 2023): about 37.8k real and 7.3k fake headlines with images. All fake items are kept and real items sampled, then split 70/15/15 into train, validation and test.</p>
+          </div>
+          <div class="card">
+            <h3>Limits</h3>
+            <p>The model learns patterns in its training data. It does not check facts, and it struggles with new events: it agreed with fact-checkers on only 2 of 5 recent posts (see Results).</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= RESULTS ================= -->
+      <section class="view" id="view-results" data-view="results" hidden aria-labelledby="results-title">
+        <header class="view-head">
+          <h1 id="results-title">Results</h1>
+          <p id="results-sub">Test-set performance, averaged over 3 training runs.</p>
+        </header>
+        <div class="kpis" id="kpis"></div>
+
+        <div class="card">
+          <div class="panel-head"><h3>Accuracy of every model on the IFND test set</h3><span class="panel-sub" id="cmp-note"></span></div>
+          <div class="hbars" id="model-bars"></div>
+        </div>
+
+        <div class="card">
+          <h3>Live test: 5 recent posts checked by fact-checkers</h3>
+          <p class="panel-sub" id="live-summary"></p>
+          <div class="table-wrap">
+            <table class="table" id="live-table">
+              <thead><tr><th scope="col">#</th><th scope="col">Claim</th><th scope="col">Fact-check</th><th scope="col">Model</th><th scope="col">P(fake)</th><th scope="col">CLIP sim</th><th scope="col"><span class="visually-hidden">Explanation</span></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Where it goes wrong</h3>
+          <p class="panel-sub">The three test posts the model got most confidently wrong.</p>
+          <div class="wrong-grid" id="wrong-grid"></div>
+        </div>
+      </section>
+
+      <!-- ================= HISTORY ================= -->
+      <section class="view" id="view-history" data-view="history" hidden aria-labelledby="history-title">
+        <header class="view-head head-row">
+          <div>
+            <h1 id="history-title">History</h1>
+            <p>Posts checked in this browser. Nothing is stored on a server.</p>
+          </div>
+          <button type="button" class="btn btn-ghost" id="history-clear" hidden>Clear history</button>
+        </header>
+        <ul class="history" id="history-list"></ul>
+        <div class="empty card" id="history-empty">
+          <svg aria-hidden="true"><use href="#i-history"/></svg>
+          <h3>No posts checked yet</h3>
+          <p>Every post you analyse appears here, so you can reopen it during the demo.</p>
+          <a class="btn btn-primary" href="#/check">Check a post</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ================= connect dialog ================= -->
+  <dialog class="dialog" id="connect-dialog" aria-labelledby="connect-title">
+    <form method="dialog" class="dialog-body" id="connect-form" novalidate>
+      <div class="dialog-head">
+        <h2 id="connect-title">Connect the model</h2>
+        <button type="button" class="icon-btn" id="connect-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <ol class="steps">
+        <li>Open the <strong>XFND_CLIP_Server</strong> notebook in Colab (T4 GPU).</li>
+        <li>Run Boxes 1 to 4 and wait for the green box.</li>
+        <li>Click its link, or copy the connection code here.</li>
+      </ol>
+      <label for="connect-code" class="field-label">Connection code</label>
+      <input id="connect-code" type="text" autocomplete="off" spellcheck="false" placeholder="https://….trycloudflare.com#key=…">
+      <p class="form-error" id="connect-error" role="alert" hidden></p>
+      <div class="dialog-foot">
+        <button type="button" class="btn btn-ghost" id="disconnect-btn" hidden>Disconnect</button>
+        <button type="submit" class="btn btn-primary" id="connect-btn">Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog lightbox" id="lightbox" aria-label="Explanation figure">
+    <button type="button" class="icon-btn" id="lightbox-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+    <img id="lightbox-img" alt="">
+  </dialog>
+
+  <script src="assets/app.js" defer></script>
+</body>
+</html>
