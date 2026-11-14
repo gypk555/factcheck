@@ -118,7 +118,7 @@ Just run it. It writes `server.py`, the small program that answers the website.
 BOX4 = r"""
 # ===== Box 4: start the model and get the link for the website =====
 # Your website address (the Render link). Change it once after deploying the site.
-SITE_URL = 'https://xfnd-clip.onrender.com'
+SITE_URL = 'https://factcheck-bbfr.onrender.com'
 
 import os, re, secrets, subprocess, time, urllib.error, urllib.parse, urllib.request
 from IPython.display import HTML, display

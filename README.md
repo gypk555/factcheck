@@ -37,7 +37,7 @@ The website is static, so it is free and always online. The model is too big for
 ### 1. Put the site online (Render)
 1. Push this folder to a GitHub repository.
 2. On [render.com](https://render.com): **New → Blueprint**, pick the repository. `render.yaml` does the rest.
-3. Note the address Render gives you, e.g. `https://xfnd-clip.onrender.com`.
+3. Note the address Render gives you, e.g. `https://factcheck-bbfr.onrender.com`.
 4. In `colab/build_notebook.py`, set `SITE_URL` to that address, run `uv run python colab/build_notebook.py`, and commit. (Or just edit `SITE_URL` in Box 4 inside Colab.)
 
 ### 2. Train once and save the model to Google Drive (Colab)
